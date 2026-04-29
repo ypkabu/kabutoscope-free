@@ -10,8 +10,8 @@ const titles: Record<string, string> = {
   risk: "危険度ランキング"
 };
 
-export default async function RankingPage({ params }: { params: { type: string } }) {
-  const type = params.type;
+export default async function RankingPage({ params }: { params: Promise<{ type: string }> }) {
+  const { type } = await params;
   if (!titles[type]) {
     notFound();
   }

@@ -5,8 +5,9 @@ import { formatDateTime, formatPercent, formatPrice } from "@/lib/format";
 import { getStockOverviewBySymbol } from "@/lib/repositories";
 import type { ScoreBlock } from "@/lib/types";
 
-export default async function StockDetailPage({ params }: { params: { symbol: string } }) {
-  const symbol = decodeURIComponent(params.symbol);
+export default async function StockDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
+  const { symbol: rawSymbol } = await params;
+  const symbol = decodeURIComponent(rawSymbol);
   const overview = await getStockOverviewBySymbol(symbol);
 
   if (!overview) {
