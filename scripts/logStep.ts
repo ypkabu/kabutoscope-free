@@ -15,7 +15,7 @@ const steps = [
   {
     title: "Step 2: 株価取得とスナップショット保存",
     implemented: [
-      "yahoo-finance2を使ったgetQuote(symbol)とgetHistoricalPrices(symbol, range)を実装",
+      "Yahoo Finance系の無料Chart APIを使ったgetQuote(symbol)とgetHistoricalPrices(symbol, range)を実装",
       "日本株の.T銘柄と米国株ティッカーに対応",
       "取得失敗時はエラーを記録して処理継続",
       "price_snapshots.raw_jsonに生レスポンスを保存"

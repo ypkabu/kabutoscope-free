@@ -1,4 +1,8 @@
+import { config } from "dotenv";
 import { runMonitoring } from "../src/lib/monitor/notificationEngine";
+
+config({ path: ".env.local" });
+config();
 
 async function main() {
   console.log("KabutoScope Free 監視ジョブを開始します。");

@@ -8,7 +8,7 @@ KabutoScope Free は、無料データソースを使って日本株・米国株
 
 - Supabase用スキーマと初期データ
 - 銘柄マスター、保有区分、アラート設定、価格スナップショット、通知ログ、スコア結果の保存
-- `yahoo-finance2` を使った無料のYahoo Finance系株価取得
+- Yahoo Finance系の無料Chart APIを使った株価取得
 - 日本株 `.T` と米国株ティッカーの取得
 - 取得失敗時に処理全体を止めない監視ジョブ
 - 移動平均、騰落率、52週高値安値距離、出来高倍率、ボラティリティなどの指標計算
@@ -167,7 +167,7 @@ Variables:
 ## 無料運用の制限
 
 - Yahoo Finance系の無料データは遅延、欠損、不正確な値、取得失敗があり得ます。
-- `yahoo-finance2` やYahoo Finance系の取得方法は商用利用を保証するものではありません。
+- Yahoo Finance系の取得方法は商用利用を保証するものではありません。
 - Supabase Free、Vercel Hobby、GitHub Actionsには利用上限があります。
 - GitHub Actionsのスケジュール実行は遅延することがあります。
 - 初版では `SP500_FUND` はYahoo Financeで取得せず、手動監視項目として扱います。

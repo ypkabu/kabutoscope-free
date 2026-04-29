@@ -1,8 +1,6 @@
-import YahooFinance from "yahoo-finance2";
 import type { HistoricalPrice, QuoteResult } from "../types";
 
 const MANUAL_SYMBOLS = new Set(["SP500_FUND"]);
-const yahooFinance = new YahooFinance();
 
 export async function getQuote(symbol: string): Promise<QuoteResult> {
   if (MANUAL_SYMBOLS.has(symbol)) {
@@ -21,11 +19,23 @@ export async function getQuote(symbol: string): Promise<QuoteResult> {
   }
 
   try {
-    const quote = (await yahooFinance.quote(symbol)) as any;
-    const currentPrice = numberOrNull(quote.regularMarketPrice ?? quote.postMarketPrice ?? quote.preMarketPrice);
-    const previousClose = numberOrNull(quote.regularMarketPreviousClose);
-    const change = numberOrNull(quote.regularMarketChange);
-    const changePercent = numberOrNull(quote.regularMarketChangePercent);
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1m`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Yahoo Finance chart API error: ${response.status}`);
+    }
+
+    const json = (await response.json()) as any;
+    const result = json.chart?.result?.[0];
+    const meta = result?.meta ?? {};
+    const timestamps: number[] = result?.timestamp ?? [];
+    const quote = result?.indicators?.quote?.[0] ?? {};
+    const currentPrice = numberOrNull(meta.regularMarketPrice ?? lastNumber(quote.close));
+    const previousClose = numberOrNull(meta.previousClose ?? meta.chartPreviousClose);
+    const change = currentPrice !== null && previousClose !== null ? currentPrice - previousClose : null;
+    const changePercent = change !== null && previousClose !== null && previousClose !== 0 ? (change / previousClose) * 100 : null;
+    const latestTimestamp = timestamps.length > 0 ? timestamps[timestamps.length - 1] : meta.regularMarketTime;
 
     return {
       symbol,
@@ -33,10 +43,10 @@ export async function getQuote(symbol: string): Promise<QuoteResult> {
       previousClose,
       change,
       changePercent,
-      volume: numberOrNull(quote.regularMarketVolume),
-      currency: quote.currency ?? null,
-      marketTime: normalizeMarketTime(quote.regularMarketTime),
-      rawJson: quote
+      volume: numberOrNull(meta.regularMarketVolume ?? lastNumber(quote.volume)),
+      currency: meta.currency ?? null,
+      marketTime: normalizeMarketTime(latestTimestamp),
+      rawJson: json
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -119,6 +129,11 @@ function normalizeMarketTime(value: unknown) {
     return value.toISOString();
   }
 
+  if (typeof value === "number") {
+    const milliseconds = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(milliseconds).toISOString();
+  }
+
   const parsed = new Date(String(value));
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
@@ -126,4 +141,19 @@ function normalizeMarketTime(value: unknown) {
 function numberOrNull(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function lastNumber(values: unknown) {
+  if (!Array.isArray(values)) {
+    return null;
+  }
+
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = numberOrNull(values[index]);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
 }
