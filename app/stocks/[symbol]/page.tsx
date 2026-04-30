@@ -5,6 +5,9 @@ import { formatDateTime, formatPercent, formatPrice } from "@/lib/format";
 import { getStockOverviewBySymbol } from "@/lib/repositories";
 import type { ScoreBlock } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function StockDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol: rawSymbol } = await params;
   const symbol = decodeURIComponent(rawSymbol);

@@ -3,6 +3,9 @@ import { ScoreBadge } from "@/components/ScoreBadge";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { getStockOverviews } from "@/lib/repositories";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function StocksPage() {
   const overviews = await getStockOverviews();
 

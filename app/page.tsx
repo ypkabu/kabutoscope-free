@@ -3,6 +3,9 @@ import { StockSummaryCard } from "@/components/StockSummaryCard";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { getRankingScore, getStockOverviews } from "@/lib/repositories";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function DashboardPage() {
   const overviews = await getStockOverviews();
   const buyCandidates = top(overviews, "buy");

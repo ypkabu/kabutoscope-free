@@ -10,6 +10,9 @@ const titles: Record<string, string> = {
   risk: "危険度ランキング"
 };
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function RankingPage({ params }: { params: Promise<{ type: string }> }) {
   const { type } = await params;
   if (!titles[type]) {
