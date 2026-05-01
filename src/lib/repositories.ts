@@ -1,8 +1,8 @@
 import { seedAlertSettings, seedHoldings, seedStocks } from "./seedData";
 import { calculateStockScore } from "./scoring/scoring";
 import { createBrowserSafeSupabaseClient } from "./supabase";
-import type { AlertSetting, Holding, NotificationLog, PriceSnapshot, ScoringResult, StockOverview } from "./types";
-import { mapAlertSetting, mapHolding, mapNotificationLog, mapPriceSnapshot, mapScoringResult, mapStock } from "./mappers";
+import type { AlertSetting, Holding, NotificationLog, PriceSnapshot, RiskLimit, ScoringResult, StockOverview } from "./types";
+import { mapAlertSetting, mapHolding, mapNotificationLog, mapPriceSnapshot, mapRiskLimit, mapScoringResult, mapStock } from "./mappers";
 
 function fallbackOverview(): StockOverview[] {
   return seedStocks.map((stock) => {
@@ -20,6 +20,7 @@ function fallbackOverview(): StockOverview[] {
       stock,
       holding,
       alertSetting,
+      riskLimit: null,
       latestSnapshot: null,
       scoring,
       recentNotifications: []
@@ -34,10 +35,11 @@ export async function getStockOverviews(): Promise<StockOverview[]> {
     return fallbackOverview();
   }
 
-  const [stocksRes, holdingsRes, alertsRes, snapshotsRes, scoringRes, notificationsRes] = await Promise.all([
+  const [stocksRes, holdingsRes, alertsRes, riskLimitsRes, snapshotsRes, scoringRes, notificationsRes] = await Promise.all([
     supabase.from("stocks").select("*").order("symbol"),
     supabase.from("holdings").select("*"),
     supabase.from("alert_settings").select("*"),
+    supabase.from("risk_limits").select("*"),
     supabase.from("price_snapshots").select("*").order("created_at", { ascending: false }).limit(500),
     supabase.from("scoring_results").select("*").order("created_at", { ascending: false }).limit(500),
     supabase.from("notification_logs").select("*").order("created_at", { ascending: false }).limit(100)
@@ -56,6 +58,10 @@ export async function getStockOverviews(): Promise<StockOverview[]> {
   const alerts = new Map<string, AlertSetting>((alertsRes.data ?? []).map((row) => {
     const alert = mapAlertSetting(row);
     return [alert.stockId, alert];
+  }));
+  const riskLimits = new Map<string, RiskLimit>((riskLimitsRes.data ?? []).map((row) => {
+    const riskLimit = mapRiskLimit(row);
+    return [riskLimit.stockId, riskLimit];
   }));
   const snapshots = new Map<string, PriceSnapshot>();
   for (const row of snapshotsRes.data ?? []) {
@@ -84,6 +90,7 @@ export async function getStockOverviews(): Promise<StockOverview[]> {
   return stocks.map((stock) => {
     const holding = holdings.get(stock.id) ?? null;
     const alertSetting = alerts.get(stock.id) ?? null;
+    const riskLimit = riskLimits.get(stock.id) ?? null;
     const latestSnapshot = snapshots.get(stock.id) ?? null;
     const scoring =
       scores.get(stock.id) ??
@@ -91,6 +98,7 @@ export async function getStockOverviews(): Promise<StockOverview[]> {
         stock,
         holding,
         alertSetting,
+        riskLimit,
         quote: latestSnapshot
           ? {
               symbol: stock.symbol,
@@ -111,6 +119,7 @@ export async function getStockOverviews(): Promise<StockOverview[]> {
       stock,
       holding,
       alertSetting,
+      riskLimit,
       latestSnapshot,
       scoring,
       recentNotifications: notifications.get(stock.id) ?? []
@@ -141,6 +150,10 @@ export function getRankingScore(overview: StockOverview, type: string) {
       return scoring.sellScore.score;
     case "risk":
       return scoring.riskScore.score;
+    case "short-term-sell":
+      return overview.holding?.investmentHorizon === "SHORT" ? scoring.sellScore.score : 0;
+    case "long-term-review":
+      return overview.holding?.investmentHorizon === "LONG" ? Math.max(scoring.sellScore.score, scoring.riskScore.score) : 0;
     default:
       return 0;
   }

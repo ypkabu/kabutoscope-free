@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { StockSummaryCard } from "@/components/StockSummaryCard";
 import { formatDateTime, formatPrice } from "@/lib/format";
+import { calculateCashStatus, calculateTagExposure, getPortfolioSettings } from "@/lib/portfolio";
 import { getRankingScore, getStockOverviews } from "@/lib/repositories";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function DashboardPage() {
-  const overviews = await getStockOverviews();
+  const [overviews, portfolioSettings] = await Promise.all([getStockOverviews(), getPortfolioSettings()]);
+  const cashStatus = calculateCashStatus(portfolioSettings);
+  const exposure = calculateTagExposure(overviews, portfolioSettings);
   const buyCandidates = top(overviews, "buy");
   const sellCandidates = top(overviews, "sell");
   const riskCandidates = top(overviews, "risk");
@@ -27,6 +30,25 @@ export default async function DashboardPage() {
       </div>
 
       <section className="grid dashboardGrid">
+        <section className="card">
+          <div className="split">
+            <h2>資金設定</h2>
+            <Link href="/portfolio/settings">編集</Link>
+          </div>
+          <p>総資金: {formatPrice(portfolioSettings.totalBudget, "JPY")}</p>
+          <p>現金: {formatPrice(portfolioSettings.cashAmount, "JPY")}</p>
+          <p>現金比率: {(cashStatus.cashRatio * 100).toFixed(1)}% / {cashStatus.status}</p>
+          <p>投資済み金額: {formatPrice(cashStatus.investedAmount, "JPY")}</p>
+        </section>
+        <section className="card">
+          <h2>ポートフォリオ偏り分析</h2>
+          {exposure.entries.length === 0 ? <p className="muted">保有数量が未入力のため、タグ別比率は未計算です。</p> : (
+            <ul className="reasonList">
+              {exposure.entries.slice(0, 6).map((item) => <li key={item.tag}>{item.tag}: {(item.ratio * 100).toFixed(1)}%</li>)}
+            </ul>
+          )}
+          {exposure.warnings.map((warning) => <p className="notice" key={warning}>{warning}</p>)}
+        </section>
         <DashboardSection title="今日の買い候補" href="/rankings/buy" rows={buyCandidates} scoreType="buy" />
         <DashboardSection title="利確・見直し候補" href="/rankings/sell" rows={sellCandidates} scoreType="sell" />
         <DashboardSection title="危険度高め" href="/rankings/risk" rows={riskCandidates} scoreType="risk" />

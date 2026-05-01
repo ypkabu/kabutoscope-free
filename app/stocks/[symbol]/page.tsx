@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ScoreBadge } from "@/components/ScoreBadge";
+import { addJournalAction } from "@/lib/actions";
 import { formatDateTime, formatPercent, formatPrice } from "@/lib/format";
 import { getStockOverviewBySymbol } from "@/lib/repositories";
+import { investmentHorizonLabels, positionPurposeLabels, strategyDescription } from "@/lib/strategy";
 import type { ScoreBlock } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +20,8 @@ export default async function StockDetailPage({ params }: { params: Promise<{ sy
   }
 
   const scoring = overview.scoring;
+  const horizon = overview.holding?.investmentHorizon ?? "MEDIUM";
+  const purpose = overview.holding?.positionPurpose ?? "WATCH";
 
   return (
     <>
@@ -35,7 +39,10 @@ export default async function StockDetailPage({ params }: { params: Promise<{ sy
             ))}
           </div>
         </div>
-        <Link href="/stocks">一覧へ戻る</Link>
+        <div className="buttonRow">
+          <Link href="/stocks">一覧へ戻る</Link>
+          <Link href={`/stocks/${encodeURIComponent(overview.stock.symbol)}/edit`}>投資期間を編集</Link>
+        </div>
       </div>
 
       <section className="grid twoCol">
@@ -50,23 +57,28 @@ export default async function StockDetailPage({ params }: { params: Promise<{ sy
         <article className="card">
           <h2>保有・アラート設定</h2>
           <p>口座区分: {overview.holding?.accountType ?? "WATCH_ONLY"}</p>
+          <p>投資期間: {investmentHorizonLabels[horizon]}</p>
+          <p>保有目的: {positionPurposeLabels[purpose]}</p>
           <p>数量: {overview.holding?.quantity ?? 0}</p>
           <p>平均取得単価: {formatPrice(overview.holding?.averagePrice, overview.latestSnapshot?.currency)}</p>
+          <p>含み損益率: {scoring?.positionProfitPercent === null || scoring?.positionProfitPercent === undefined ? "未計算" : formatPercent(scoring.positionProfitPercent)}</p>
           <p>メモ: {overview.holding?.memo ?? "未設定"}</p>
           <p>買いライン: {formatPrice(overview.alertSetting?.buyBelow, overview.latestSnapshot?.currency)}</p>
           <p>利確ライン: {formatPrice(overview.alertSetting?.takeProfit, overview.latestSnapshot?.currency)}</p>
           <p>強め利確ライン: {formatPrice(overview.alertSetting?.strongTakeProfit, overview.latestSnapshot?.currency)}</p>
           <p>損切りライン: {formatPrice(overview.alertSetting?.stopLoss, overview.latestSnapshot?.currency)}</p>
           <p>通知: {overview.alertSetting?.notifyEnabled ? "有効" : "無効"}</p>
-          <button className="disabledButton" disabled>
-            編集機能は次版で追加
-          </button>
+          <p className="notice">{strategyDescription(overview.stock, overview.holding)}</p>
         </article>
       </section>
 
       {scoring ? (
         <section className="card" style={{ marginTop: 16 }}>
           <h2>スコア</h2>
+          <p>総合判定: <strong>{scoring.overallLabel}</strong></p>
+          {scoring.doNotBuyReasons.length > 0 ? (
+            <p className="notice">買わない理由: {scoring.doNotBuyReasons.join("、")}</p>
+          ) : null}
           <div className="scoreGrid">
             <ScoreDetail title="NISA向き" block={scoring.nisaScore} />
             <ScoreDetail title="特定口座向き" block={scoring.tokuteiScore} />
@@ -111,6 +123,34 @@ export default async function StockDetailPage({ params }: { params: Promise<{ sy
           </article>
         </section>
       ) : null}
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>判断メモを追加</h2>
+        <form className="formGrid" action={addJournalAction}>
+          <input type="hidden" name="stockId" value={overview.stock.id} />
+          <input type="hidden" name="symbol" value={overview.stock.symbol} />
+          <label>actionType
+            <select name="actionType" defaultValue="BUY_PLAN">
+              <option value="BUY_PLAN">買う前の計画</option>
+              <option value="BUY">買い記録</option>
+              <option value="SELL_PLAN">売る前の計画</option>
+              <option value="SELL">売り記録</option>
+              <option value="HOLD">継続保有</option>
+              <option value="REVIEW">見直し</option>
+            </select>
+          </label>
+          <label>accountType<select name="accountType" defaultValue={overview.holding?.accountType === "NISA" ? "NISA" : "TOKUTEI"}><option value="NISA">NISA</option><option value="TOKUTEI">TOKUTEI</option></select></label>
+          <label>価格<input name="price" type="number" step="0.01" defaultValue={overview.latestSnapshot?.currentPrice ?? undefined} /></label>
+          <label>数量<input name="quantity" type="number" step="0.01" /></label>
+          <label>なぜこの銘柄を買う/見直すのか<textarea name="reason" /></label>
+          <label>期待シナリオ<textarea name="expectedScenario" /></label>
+          <label>見直し条件<textarea name="exitCondition" /></label>
+          <label>利確条件<textarea name="takeProfitCondition" /></label>
+          <label>損切り条件<textarea name="stopLossCondition" /></label>
+          <label>感情タグ<select name="emotionTag" defaultValue="planned"><option value="calm">落ち着いている</option><option value="fear_of_missing_out">置いていかれ不安</option><option value="panic">焦り</option><option value="planned">計画通り</option><option value="revenge_trade">取り返したい気持ち</option><option value="uncertain">迷い</option></select></label>
+          <button type="submit">判断メモを保存</button>
+        </form>
+      </section>
 
       <section className="card" style={{ marginTop: 16 }}>
         <h2>最近の価格スナップショット</h2>

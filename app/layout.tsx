@@ -22,6 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/rankings/buy">買い候補</Link>
             <Link href="/rankings/sell">利確・見直し</Link>
             <Link href="/rankings/risk">危険度</Link>
+            <Link href="/portfolio/target">目標</Link>
+            <Link href="/import/stocks">インポート</Link>
           </nav>
         </header>
         <main>{children}</main>

@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getHistoricalPrices, getQuote } from "../finance/yahoo";
-import { mapAlertSetting, mapHolding, mapStock } from "../mappers";
+import { mapAlertSetting, mapHolding, mapRiskLimit, mapStock } from "../mappers";
 import { calculateStockScore } from "../scoring/scoring";
+import { investmentHorizonLabels, positionPurposeLabels } from "../strategy";
 import { createServiceSupabaseClient } from "../supabase";
-import type { AlertSetting, Holding, NotificationType, QuoteResult, ScoringResult, Stock } from "../types";
+import type { AlertSetting, Holding, NotificationType, QuoteResult, RiskLimit, ScoringResult, Stock } from "../types";
 
 type MonitorSummary = {
   checked: number;
@@ -42,7 +43,7 @@ export async function runMonitoring(): Promise<MonitorSummary> {
     summary.checked += 1;
 
     try {
-      const [holding, alertSetting] = await Promise.all([fetchHolding(supabase, stock.id), fetchAlertSetting(supabase, stock.id)]);
+      const [holding, alertSetting, riskLimit] = await Promise.all([fetchHolding(supabase, stock.id), fetchAlertSetting(supabase, stock.id), fetchRiskLimit(supabase, stock.id)]);
       const quote = await getQuote(stock.symbol);
       const historicalPrices = await getHistoricalPrices(stock.symbol, "1y");
 
@@ -53,6 +54,7 @@ export async function runMonitoring(): Promise<MonitorSummary> {
         stock,
         holding,
         alertSetting,
+        riskLimit,
         quote,
         historicalPrices
       });
@@ -96,6 +98,15 @@ async function fetchAlertSetting(supabase: SupabaseClient, stockId: string): Pro
     return null;
   }
   return data ? mapAlertSetting(data) : null;
+}
+
+async function fetchRiskLimit(supabase: SupabaseClient, stockId: string): Promise<RiskLimit | null> {
+  const { data, error } = await supabase.from("risk_limits").select("*").eq("stock_id", stockId).maybeSingle();
+  if (error) {
+    console.error(`リスク上限の取得に失敗しました: ${stockId} - ${error.message}`);
+    return null;
+  }
+  return data ? mapRiskLimit(data) : null;
 }
 
 async function saveSnapshot(supabase: SupabaseClient, stock: Stock, quote: QuoteResult) {
@@ -270,6 +281,10 @@ function buildDiscordMessage(
     `強め利確ライン：${formatPrice(alertSetting.strongTakeProfit)}${priceSuffix}`,
     `損切りライン：${formatPrice(alertSetting.stopLoss)}${priceSuffix}`,
     `口座区分：${holding?.accountType ?? "WATCH_ONLY"}`,
+    `投資期間：${investmentHorizonLabels[holding?.investmentHorizon ?? "MEDIUM"]}`,
+    `目的：${positionPurposeLabels[holding?.positionPurpose ?? "WATCH"]}`,
+    `平均取得単価：${formatPrice(holding?.averagePrice)}${priceSuffix}`,
+    `含み損益：${scoring.positionProfitPercent === null ? "未計算" : `${scoring.positionProfitPercent >= 0 ? "+" : ""}${scoring.positionProfitPercent.toFixed(1)}%`}`,
     "",
     `NISA向き：${scoring.nisaScore.score}/100`,
     `特定口座向き：${scoring.tokuteiScore.score}/100`,
@@ -277,10 +292,12 @@ function buildDiscordMessage(
     `売り候補：${scoring.sellScore.score}/100`,
     `危険度：${scoring.riskScore.score}/100`,
     `判定信頼度：${scoring.confidenceScore.score}/100`,
+    `総合判定：${scoring.overallLabel}`,
     "",
     "理由：",
     ...(reasons.length > 0 ? reasons.map((reason) => `・${reason}`) : ["・判定材料が不足しているため、手動確認を優先してください"]),
     "",
+    ...(scoring.doNotBuyReasons.length > 0 ? ["買わない理由:", ...scoring.doNotBuyReasons.map((reason) => `・${reason}`), ""] : []),
     `コメント：${mainComment(scoring)}`,
     "",
     "注意：これは投資助言ではなく、自分用の情報整理通知です。自動売買は行いません。",

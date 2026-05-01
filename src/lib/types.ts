@@ -1,6 +1,16 @@
 export type AccountType = "NISA" | "TOKUTEI" | "WATCH_ONLY";
 
-export type MarketType = "TSE" | "NASDAQ" | "NYSE" | "FUND" | "OTHER";
+export type MarketType = "TSE" | "NASDAQ" | "NYSE" | "FUND" | "OTHER" | "JP_STOCK" | "US_STOCK";
+
+export type TargetAccountType = "NISA" | "TOKUTEI" | "CASH";
+
+export type InvestmentHorizon = "SHORT" | "MEDIUM" | "LONG";
+
+export type PositionPurpose = "CORE" | "INCOME" | "GROWTH" | "THEME" | "REBOUND" | "WATCH";
+
+export type TradeActionType = "BUY_PLAN" | "BUY" | "SELL_PLAN" | "SELL" | "HOLD" | "REVIEW";
+
+export type EmotionTag = "calm" | "fear_of_missing_out" | "panic" | "planned" | "revenge_trade" | "uncertain";
 
 export type NotificationType =
   | "BUY_LINE"
@@ -28,6 +38,8 @@ export type Holding = {
   id: string;
   stockId: string;
   accountType: AccountType;
+  investmentHorizon: InvestmentHorizon;
+  positionPurpose: PositionPurpose;
   quantity: number;
   averagePrice: number | null;
   memo: string | null;
@@ -60,6 +72,68 @@ export type PriceSnapshot = {
   marketTime: string | null;
   rawJson: unknown;
   createdAt?: string;
+};
+
+export type RiskLimit = {
+  id: string;
+  stockId: string;
+  maxInvestmentAmount: number | null;
+  maxPortfolioWeight: number | null;
+  warningEnabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type TargetPortfolio = {
+  id: string;
+  symbol: string;
+  name: string;
+  targetAccountType: TargetAccountType;
+  targetQuantity: number | null;
+  targetAmount: number | null;
+  priority: number;
+  memo: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type PortfolioSettings = {
+  totalBudget: number;
+  cashAmount: number;
+  rakutenNisaBudget: number;
+  sbiTokuteiBudget: number;
+  minimumCashRatio: number;
+  warningCashRatio: number;
+};
+
+export type TradeJournal = {
+  id: string;
+  stockId: string | null;
+  symbol: string;
+  actionType: TradeActionType;
+  accountType: Exclude<AccountType, "WATCH_ONLY">;
+  price: number | null;
+  quantity: number | null;
+  reason: string | null;
+  expectedScenario: string | null;
+  exitCondition: string | null;
+  takeProfitCondition: string | null;
+  stopLossCondition: string | null;
+  emotionTag: EmotionTag | null;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type StockEvent = {
+  id: string;
+  stockId: string | null;
+  symbol: string;
+  eventType: "EARNINGS" | "DIVIDEND" | "SHAREHOLDER_BENEFIT" | "PRODUCT_EVENT" | "OTHER";
+  eventDate: string;
+  title: string;
+  memo: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type HistoricalPrice = {
@@ -104,6 +178,9 @@ export type ScoringResult = {
   sellScore: ScoreBlock;
   riskScore: ScoreBlock;
   confidenceScore: ScoreBlock;
+  doNotBuyReasons: string[];
+  overallLabel: string;
+  positionProfitPercent: number | null;
   indicators: TechnicalIndicators;
   generatedAt: string;
 };
@@ -127,6 +204,7 @@ export type StockOverview = {
   stock: Stock;
   holding: Holding | null;
   alertSetting: AlertSetting | null;
+  riskLimit: RiskLimit | null;
   latestSnapshot: PriceSnapshot | null;
   scoring: ScoringResult | null;
   recentNotifications?: NotificationLog[];

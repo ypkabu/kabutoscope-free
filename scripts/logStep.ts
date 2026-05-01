@@ -71,6 +71,24 @@ const steps = [
       "投資助言ではないこと、自動売買をしないこと、最終判断はユーザー自身が行うことを明記"
     ],
     verify: ["README.mdを読み、.env.exampleの変数を埋めればローカル実行できることを確認"]
+  },
+  {
+    title: "追加改善: 投資レーダー化",
+    implemented: [
+      "investmentHorizon / positionPurpose をholdingsに追加し、既存データをタグと口座区分から自動補完",
+      "JSON / CSV 一括インポート、プリセット登録、13万円プラン自動セットアップを追加",
+      "資金設定、目標ポートフォリオ、タグ偏り分析、判断メモ、通知後検証ページを追加",
+      "短期・中期・長期の投資期間に応じて買い・売り・リスク判定を調整",
+      "ランキングとDiscord通知に投資期間・保有目的・総合判定を表示"
+    ],
+    verify: [
+      "Supabase SQL Editorでsupabase/migrations/002_portfolio_radar.sqlを実行",
+      "/import/stocks でJSONまたはCSVを検証して一括登録",
+      "/import/presets で13万円初期プランを登録",
+      "/portfolio/settings で資金設定を保存",
+      "/stocks/[symbol]/edit で投資期間と保有目的を切り替え",
+      "/rankings/by-horizon で短期・中期・長期の分類を確認"
+    ]
   }
 ];
 

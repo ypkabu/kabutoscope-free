@@ -4,6 +4,7 @@ import type {
   HistoricalPrice,
   Holding,
   QuoteResult,
+  RiskLimit,
   ScoreBlock,
   ScoringResult,
   Stock,
@@ -14,6 +15,7 @@ type ScoreInput = {
   stock: Stock;
   holding: Holding | null;
   alertSetting: AlertSetting | null;
+  riskLimit?: RiskLimit | null;
   quote: QuoteResult | null;
   historicalPrices: HistoricalPrice[];
 };
@@ -27,14 +29,17 @@ type ScoreDraft = {
 
 export function calculateStockScore(input: ScoreInput): ScoringResult {
   const indicators = calculateIndicators(input.quote, input.historicalPrices, input.alertSetting);
-  const riskDraft = riskScore(input.stock, indicators, input.quote, input.alertSetting);
+  const positionProfitPercent = calculatePositionProfitPercent(input.holding, input.quote);
+  const riskDraft = riskScore(input.stock, input.holding, indicators, input.quote, input.alertSetting, positionProfitPercent);
   const riskBlock = toBlock(riskDraft, labelRisk(riskDraft.score), buildRiskComment(riskDraft.score, riskDraft.positiveFactors));
 
   const nisaDraft = nisaScore(input.stock, input.holding, indicators, input.alertSetting, riskDraft.score);
   const tokuteiDraft = tokuteiScore(input.stock, input.holding, indicators, input.alertSetting, riskDraft.score);
-  const buyDraft = buyScore(input.stock, indicators, input.quote, input.alertSetting, riskDraft.score);
-  const sellDraft = sellScore(input.stock, input.holding, indicators, input.quote, input.alertSetting);
+  const buyDraft = buyScore(input.stock, input.holding, indicators, input.quote, input.alertSetting, riskDraft.score);
+  const sellDraft = sellScore(input.stock, input.holding, indicators, input.quote, input.alertSetting, positionProfitPercent);
   const confidenceDraft = confidenceScore(input.quote, input.historicalPrices, input.alertSetting, input.holding, indicators);
+  const doNotBuyReasons = buildDoNotBuyReasons(input.stock, input.holding, indicators, input.alertSetting, riskDraft.score, input.riskLimit);
+  const overallLabel = decideOverallLabel(buyDraft.score, sellDraft.score, riskDraft.score, doNotBuyReasons, input.holding, indicators);
 
   return {
     nisaScore: toBlock(nisaDraft, labelNisa(nisaDraft.score), buildNisaComment(nisaDraft.score, input.stock.tags)),
@@ -51,6 +56,9 @@ export function calculateStockScore(input: ScoreInput): ScoringResult {
       confidenceDraft.score >= 75 ? "判定信頼度高め" : confidenceDraft.score >= 50 ? "判定信頼度ふつう" : "データ不足",
       confidenceDraft.score < 60 ? "データ不足のため判定信頼度は低めです。" : "主要データが揃っており、ルール判定の材料は比較的十分です。"
     ),
+    doNotBuyReasons,
+    overallLabel,
+    positionProfitPercent,
     indicators,
     generatedAt: new Date().toISOString()
   };
@@ -130,6 +138,7 @@ function tokuteiScore(
 
 function buyScore(
   stock: Stock,
+  holding: Holding | null,
   indicators: TechnicalIndicators,
   quote: QuoteResult | null,
   alertSetting: AlertSetting | null,
@@ -164,6 +173,23 @@ function buyScore(
   if (riskScoreValue > 75) addNegative(draft, 14, "危険度が高い");
   if (belowMa(indicators, "ma75") && indicators.return5d !== null && indicators.return5d < -8) addNegative(draft, 10, "75日線割れで反発確認が弱い");
 
+  const horizon = holding?.investmentHorizon ?? "MEDIUM";
+  const purpose = holding?.positionPurpose ?? "WATCH";
+  if (horizon === "SHORT") {
+    if (indicators.volumeRatio !== null && indicators.volumeRatio >= 1.2) addPositive(draft, 4, "短期枠では出来高増加を重視");
+    if (riskScoreValue >= 80) addNegative(draft, 10, "短期枠では危険度80以上を強く警戒");
+  }
+  if (horizon === "MEDIUM") {
+    if (aboveMa(indicators, "ma75")) addPositive(draft, 5, "中期枠では75日線維持を評価");
+    if (stock.tags.some((tag) => ["semiconductor", "ai", "defense", "datacenter", "game"].includes(tag))) addPositive(draft, 4, "中期テーマ継続を監視");
+  }
+  if (horizon === "LONG") {
+    if (stock.tags.some((tag) => ["dividend", "shareholder_benefit", "defensive", "long_term", "sp500", "index"].includes(tag))) addPositive(draft, 8, "長期枠では安定・配当・土台タグを評価");
+    if (riskScoreValue < 60) addPositive(draft, 5, "長期枠では一時的な値動きを過度に重く見ない");
+  }
+  if (purpose === "CORE" || purpose === "INCOME") addPositive(draft, 3, "目的に沿った長期監視枠");
+  if (purpose === "WATCH") addNegative(draft, 5, "監視のみのため買い判定は控えめ");
+
   return finish(draft);
 }
 
@@ -172,7 +198,8 @@ function sellScore(
   holding: Holding | null,
   indicators: TechnicalIndicators,
   quote: QuoteResult | null,
-  alertSetting: AlertSetting | null
+  alertSetting: AlertSetting | null,
+  positionProfitPercent: number | null
 ): ScoreDraft {
   const draft = baseDraft(25);
   const currentPrice = quote?.currentPrice ?? null;
@@ -199,10 +226,33 @@ function sellScore(
     addNegative(draft, 10, "NISA長期ディフェンシブ枠のため通常利確は控えめ");
   }
 
+  const horizon = holding?.investmentHorizon ?? "MEDIUM";
+  const purpose = holding?.positionPurpose ?? "WATCH";
+  if (!hasHolding) {
+    addNegative(draft, 15, "未保有または監視のみのため売り判定は低め");
+  }
+  if (horizon === "SHORT") {
+    if (positionProfitPercent !== null && positionProfitPercent >= 10) addPositive(draft, 10, "短期枠で含み益10%以上");
+    if (positionProfitPercent !== null && positionProfitPercent >= 20) addPositive(draft, 15, "短期枠で含み益20%以上");
+    if (indicators.return5d !== null && indicators.return5d >= 10) addPositive(draft, 8, "短期で大きく上昇");
+  }
+  if (horizon === "MEDIUM") {
+    if (positionProfitPercent !== null && positionProfitPercent >= 20) addPositive(draft, 10, "中期枠で含み益20%以上");
+    if (positionProfitPercent !== null && positionProfitPercent >= 35) addPositive(draft, 15, "中期枠で含み益35%以上");
+    if (indicators.return20d !== null && indicators.return20d >= 20) addPositive(draft, 8, "中期で上昇率が高い");
+  }
+  if (horizon === "LONG") {
+    addNegative(draft, 12, "長期枠のため短期上昇だけでは売り判定を抑制");
+    if (positionProfitPercent !== null && positionProfitPercent >= 50) addPositive(draft, 15, "長期枠で含み益50%以上、比率調整候補");
+    if (positionProfitPercent !== null && positionProfitPercent >= 100) addPositive(draft, 20, "長期枠で含み益100%以上、元本回収や比率調整を検討");
+  }
+  if (purpose === "CORE" || purpose === "INCOME") addNegative(draft, 6, "コア・配当目的のため短期利確は控えめ");
+  if (purpose === "THEME" || purpose === "REBOUND") addPositive(draft, 5, "テーマ・反発枠のため利益確定を早めに監視");
+
   return finish(draft);
 }
 
-function riskScore(stock: Stock, indicators: TechnicalIndicators, quote: QuoteResult | null, alertSetting: AlertSetting | null): ScoreDraft {
+function riskScore(stock: Stock, holding: Holding | null, indicators: TechnicalIndicators, quote: QuoteResult | null, alertSetting: AlertSetting | null, positionProfitPercent: number | null): ScoreDraft {
   const draft = baseDraft(25);
   const currentPrice = quote?.currentPrice ?? null;
 
@@ -220,6 +270,24 @@ function riskScore(stock: Stock, indicators: TechnicalIndicators, quote: QuoteRe
   if (aboveMa(indicators, "ma75")) addNegative(draft, 8, "75日線を維持");
   if (indicators.volatility20d !== null && indicators.volatility20d < 1.5) addNegative(draft, 7, "ボラティリティが低め");
   if (stock.tags.includes("defensive") || stock.tags.includes("long_term")) addNegative(draft, 5, "長期安定タグあり");
+
+  const horizon = holding?.investmentHorizon ?? "MEDIUM";
+  const purpose = holding?.positionPurpose ?? "WATCH";
+  if (horizon === "SHORT") {
+    if (positionProfitPercent !== null && positionProfitPercent <= -7) addPositive(draft, 10, "短期枠で含み損7%以上");
+    if (positionProfitPercent !== null && positionProfitPercent <= -10) addPositive(draft, 15, "短期枠で損切り候補水準");
+  }
+  if (horizon === "MEDIUM") {
+    if (positionProfitPercent !== null && positionProfitPercent <= -12) addPositive(draft, 8, "中期枠で含み損12%以上");
+    if (positionProfitPercent !== null && positionProfitPercent <= -18) addPositive(draft, 12, "中期枠で見直し候補水準");
+  }
+  if (horizon === "LONG") {
+    addNegative(draft, 8, "長期枠のため短期下落だけでは危険度を上げすぎない");
+    if (positionProfitPercent !== null && positionProfitPercent <= -20) addPositive(draft, 8, "長期枠でも含み損20%以上は注意");
+    if (positionProfitPercent !== null && positionProfitPercent <= -30 && belowMa(indicators, "ma75")) addPositive(draft, 12, "長期枠で大きな下落と長期線割れ");
+  }
+  if (purpose === "CORE" || purpose === "INCOME") addNegative(draft, 5, "コア・配当目的は短期変動を控えめに評価");
+  if (purpose === "THEME" || purpose === "REBOUND") addPositive(draft, 5, "テーマ・反発枠は変動リスクを強めに監視");
 
   return finish(draft);
 }
@@ -321,12 +389,16 @@ function labelTokutei(score: number) {
 }
 
 function labelBuy(score: number) {
+  if (score >= 85) return "強い買い候補";
+  if (score >= 75) return "少額なら買い候補";
+  if (score >= 70) return "買いライン接近";
   if (score >= 80) return "買い候補";
   if (score >= 60) return "監視候補";
   return "様子見";
 }
 
 function labelSell(score: number) {
+  if (score >= 80) return "利確優先";
   if (score >= 85) return "強め利確候補";
   if (score >= 70) return "一部利確候補";
   if (score >= 50) return "継続保有";
@@ -366,9 +438,59 @@ function buildBuyComment(score: number, riskScoreValue: number) {
 }
 
 function buildSellComment(score: number) {
-  if (score >= 85) return "強め利確ラインや過熱条件に近く、見直し候補です。";
+  if (score >= 85) return "強め利確ラインや過熱条件に近く、利確優先候補です。";
   if (score >= 70) return "利確ラインに到達し、短期上昇率も高いため一部利確候補です。";
   return "利確よりも継続監視寄りの判定です。";
+}
+
+function calculatePositionProfitPercent(holding: Holding | null, quote: QuoteResult | null) {
+  if (!holding || !holding.quantity || !holding.averagePrice || holding.averagePrice <= 0 || quote?.currentPrice === null || quote?.currentPrice === undefined) {
+    return null;
+  }
+
+  return ((quote.currentPrice - holding.averagePrice) / holding.averagePrice) * 100;
+}
+
+function buildDoNotBuyReasons(
+  stock: Stock,
+  holding: Holding | null,
+  indicators: TechnicalIndicators,
+  alertSetting: AlertSetting | null,
+  riskScoreValue: number,
+  riskLimit?: RiskLimit | null
+) {
+  const reasons: string[] = [];
+  if (indicators.return20d !== null && indicators.return20d > 18) reasons.push("短期で上がりすぎ");
+  if (belowMa(indicators, "ma75") && indicators.return5d !== null && indicators.return5d < -8) reasons.push("75日線を大きく下回っている");
+  if (indicators.volumeRatio !== null && indicators.volumeRatio > 1.8 && indicators.return5d !== null && indicators.return5d < 0) reasons.push("出来高を伴って下落");
+  if (riskScoreValue >= 75) reasons.push("riskScore が高すぎる");
+  if (indicators.distanceToBuyBelow !== null && indicators.distanceToBuyBelow > 20) reasons.push("買いラインよりかなり上");
+  if (stock.tags.includes("high_volatility") && holding?.investmentHorizon === "LONG") reasons.push("長期枠としては値動きが荒い");
+  const investedAmount = (holding?.quantity ?? 0) * (indicators.currentPrice ?? holding?.averagePrice ?? 0);
+  if (riskLimit?.maxInvestmentAmount && investedAmount >= riskLimit.maxInvestmentAmount * 0.8) reasons.push("最大投資額に近い");
+  if (alertSetting?.buyBelow === null || alertSetting?.buyBelow === undefined) reasons.push("買いライン未設定");
+  return Array.from(new Set(reasons));
+}
+
+function decideOverallLabel(
+  buyScoreValue: number,
+  sellScoreValue: number,
+  riskScoreValue: number,
+  doNotBuyReasons: string[],
+  holding: Holding | null,
+  indicators: TechnicalIndicators
+) {
+  if (riskScoreValue >= 85) return "撤退検討";
+  if (sellScoreValue >= 80) return "利確優先";
+  if (buyScoreValue >= 85 && riskScoreValue < 55 && doNotBuyReasons.length === 0) return "強い買い候補";
+  if (buyScoreValue >= 75 && riskScoreValue < 70) return "少額なら買い候補";
+  if (buyScoreValue >= 70 && riskScoreValue >= 70) return "買わない理由あり";
+  if (doNotBuyReasons.length > 0) return "買わない理由あり";
+  if (indicators.distanceToBuyBelow !== null && indicators.distanceToBuyBelow > 20) return "高値追い注意";
+  if (holding?.positionPurpose === "WATCH") return "監視のみ";
+  if (buyScoreValue >= 65) return "買いライン接近";
+  if (riskScoreValue >= 65) return "反発確認待ち";
+  return "監視のみ";
 }
 
 function buildRiskComment(score: number, positives: string[]) {

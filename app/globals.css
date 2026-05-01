@@ -262,6 +262,70 @@ tr:last-child td {
   font-weight: 700;
 }
 
+.formGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.formGrid label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: #fff;
+}
+
+textarea,
+.textarea {
+  min-height: 220px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+button {
+  border: 1px solid #145a92;
+  border-radius: 6px;
+  background: var(--blue);
+  color: #fff;
+  padding: 10px 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.buttonRow,
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.formRow label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
 @media (max-width: 900px) {
   .siteHeader,
   .pageHeader {

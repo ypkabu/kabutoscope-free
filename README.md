@@ -57,13 +57,141 @@ npm run build
 ## 画面
 
 - `/`: ダッシュボード
+- `/dashboard`: ダッシュボード
 - `/stocks`: 銘柄一覧
+- `/stocks/new`: 銘柄追加
 - `/stocks/[symbol]`: 銘柄詳細
+- `/stocks/[symbol]/edit`: 投資期間・保有目的の編集
 - `/rankings/nisa`: NISA向き候補ランキング
 - `/rankings/tokutei`: 特定口座向き候補ランキング
 - `/rankings/buy`: 買い候補ランキング
 - `/rankings/sell`: 保有株の利確・見直し候補ランキング
 - `/rankings/risk`: 危険度ランキング
+- `/rankings/short-term-sell`: 短期利確候補ランキング
+- `/rankings/long-term-review`: 長期見直し候補ランキング
+- `/rankings/by-horizon`: 投資期間別ランキング
+- `/portfolio/target`: 目標ポートフォリオ
+- `/portfolio/settings`: 資金設定
+- `/plan/initial-130k`: 13万円プラン専用ダッシュボード
+- `/import/stocks`: JSON / CSV 一括インポート
+- `/import/presets`: プリセット登録
+- `/journal`: 取引メモ・判断記録
+- `/analytics/notifications`: 通知後パフォーマンス検証
+
+## JSONインポート方法
+
+`/import/stocks` を開き、JSONを貼り付けて「検証」を押します。エラーがなければ「一括登録」を押します。
+
+`investmentHorizon` と `positionPurpose` を指定できます。古いJSONにこの2項目がない場合は、口座区分とタグから自動補完します。
+
+```json
+[
+  {
+    "symbol": "6526.T",
+    "name": "ソシオネクスト",
+    "market": "JP_STOCK",
+    "country": "JP",
+    "sector": "semiconductor",
+    "accountType": "TOKUTEI",
+    "investmentHorizon": "SHORT",
+    "positionPurpose": "THEME",
+    "tags": ["semiconductor", "ai", "high_volatility", "growth", "tokutei"],
+    "buyBelow": 1900,
+    "takeProfit": 2400,
+    "strongTakeProfit": 2700,
+    "stopLoss": 1700,
+    "maxInvestmentAmount": 30000,
+    "maxPortfolioWeight": 0.25,
+    "notifyEnabled": true,
+    "memo": "SBI特定口座の半導体短期・中期枠。買いすぎ注意。"
+  }
+]
+```
+
+## CSVインポート方法
+
+`/import/stocks` はCSVにも対応しています。新しいCSVヘッダーは以下です。
+
+```csv
+symbol,name,market,country,sector,accountType,investmentHorizon,positionPurpose,tags,buyBelow,takeProfit,strongTakeProfit,stopLoss,maxInvestmentAmount,maxPortfolioWeight,notifyEnabled,memo
+```
+
+`tags` は `|` 区切りです。古いCSVに `investmentHorizon` と `positionPurpose` がない場合も、自動補完します。
+
+```csv
+6526.T,ソシオネクスト,JP_STOCK,JP,semiconductor,TOKUTEI,SHORT,THEME,semiconductor|ai|high_volatility|growth|tokutei,1900,2400,2700,1700,30000,0.25,true,SBI特定口座の半導体短期・中期枠
+```
+
+## プリセット登録方法
+
+`/import/presets` から以下のプリセットを登録できます。
+
+- 13万円初期プラン
+- 長期NISA候補セット
+- 半導体・AI短期候補セット
+- 防衛・重工テーマ候補セット
+- ゲーム・エンタメ候補セット
+- 高配当・優待候補セット
+- 米国AI大型株候補セット
+
+既存銘柄は「更新」または「スキップ」を選べます。登録後は各銘柄の詳細ページで内容を確認してください。
+
+## 13万円プランの自動セットアップ
+
+`/import/presets` の「13万円プランをセットアップ」を押すと、銘柄、目標ポートフォリオ、資金設定をまとめて登録します。
+
+資金設定の初期値:
+
+- 総資金: 130,000円
+- 現金: 130,000円
+- 楽天NISA予定額: 65,000円
+- SBI特定口座予定額: 50,000円
+- 最低現金比率: 10%
+- 警告現金比率: 20%
+
+## 資金設定の変更方法
+
+`/portfolio/settings` で総資金、現金、楽天NISA予定額、SBI特定口座予定額、最低現金比率、警告現金比率を変更できます。
+
+金額入力欄は日本円のnumber inputです。1,000円単位で上下でき、`+1万円` / `-1万円` ボタンも使えます。
+
+「13万円プランに戻す」を押すと初期値に戻ります。保存するたびに `portfolio_settings_history` に履歴を残します。
+
+現金比率の意味:
+
+- 現金比率20%以上: 安全
+- 現金比率10〜20%: 注意
+- 現金比率10%未満: 危険
+
+楽天NISA予定額は長期・非課税枠の目安、SBI特定口座予定額は短期〜中期のテーマ監視枠の目安です。買いすぎ警告や最大投資額の判定では、総資金や各銘柄の上限を参考にします。
+
+## 投資期間別ロジック
+
+`investmentHorizon` は、同じ銘柄でも持ち方によって判定を変えるための設定です。
+
+- `SHORT`: 数日〜数週間の短期売買。価格ライン、短期モメンタム、出来高、早めの利確・損切りを重視します。
+- `MEDIUM`: 数ヶ月〜1年程度の中期保有。テーマ継続、25日線・75日線、決算後の変化を重視します。
+- `LONG`: 1年以上の長期保有。短期値動きだけでは売り判定を強くせず、事業・配当・優待・長期トレンドを重視します。
+
+`positionPurpose` は保有目的です。
+
+- `CORE`: S&P500など資産の土台
+- `INCOME`: 配当・優待
+- `GROWTH`: 長期成長
+- `THEME`: 半導体・防衛などテーマ
+- `REBOUND`: 下落後の反発
+- `WATCH`: 監視のみ
+
+短期銘柄は +10〜20% の含み益でも利確候補が出やすく、損切り判定も早めです。長期NISA枠は短期上昇だけでは売り判定を弱め、減配・優待改悪・長期トレンド崩れを重視します。半導体銘柄はテーマ性を評価しますが、高ボラティリティや集中リスクにも注意します。
+
+NISA長期枠とSBI特定短期枠では、同じ銘柄でも売り時が変わります。これは「いつまで・何の目的で持つか」が違うためです。
+
+## 登録後に編集する方法
+
+- 銘柄追加: `/stocks/new`
+- 投資期間・保有目的の編集: `/stocks/[symbol]/edit`
+- 判断メモの追加: `/stocks/[symbol]` または `/journal`
+- 資金設定の編集: `/portfolio/settings`
 
 ## GitHub Actions
 
@@ -92,3 +220,20 @@ Variables:
 - 初版では `SP500_FUND` はYahoo Financeで取得せず、手動監視項目として扱います。
 - このアプリは個人利用向けとして作っています。
 - 投資助言、売買指示、自動売買は行いません。
+
+## 動作確認手順
+
+1. `/import/stocks` を開く
+2. JSONを貼る
+3. 検証ボタンで内容確認できる
+4. 一括登録できる
+5. 既存銘柄はスキップまたは更新できる
+6. `/import/presets` を開く
+7. 13万円初期プランを登録できる
+8. `/portfolio/target` に反映される
+9. `/rankings/nisa` にNISA候補が反映される
+10. `/rankings/tokutei` に特定口座候補が反映される
+11. ソシオネクストを `SHORT` / `THEME` に設定できる
+12. NTTを `LONG` / `INCOME` に設定できる
+13. `/rankings/by-horizon` で期間別に表示される
+14. Discord通知に投資期間と目的が表示される

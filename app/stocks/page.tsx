@@ -16,6 +16,7 @@ export default async function StocksPage() {
           <h1>銘柄一覧</h1>
           <p className="muted">株式マスター、保有区分、アラート設定、直近スコアを確認します。</p>
         </div>
+        <Link href="/stocks/new">銘柄を追加</Link>
       </div>
 
       <div className="tableWrap">
@@ -26,6 +27,8 @@ export default async function StocksPage() {
               <th>市場</th>
               <th>現在値</th>
               <th>口座区分</th>
+              <th>投資期間</th>
+              <th>目的</th>
               <th>NISA</th>
               <th>特定</th>
               <th>買い</th>
@@ -54,6 +57,8 @@ export default async function StocksPage() {
                 </td>
                 <td>{formatPrice(row.latestSnapshot?.currentPrice, row.latestSnapshot?.currency)}</td>
                 <td>{row.holding?.accountType ?? "WATCH_ONLY"}</td>
+                <td>{row.holding?.investmentHorizon ?? "MEDIUM"}</td>
+                <td>{row.holding?.positionPurpose ?? "WATCH"}</td>
                 <td>
                   <ScoreBadge label={row.scoring?.nisaScore.label ?? "データ不足"} score={row.scoring?.nisaScore.score ?? null} />
                 </td>

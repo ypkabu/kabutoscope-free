@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatPrice } from "@/lib/format";
 import { getRankingScore } from "@/lib/repositories";
+import { investmentHorizonLabels, positionPurposeLabels } from "@/lib/strategy";
 import type { StockOverview } from "@/lib/types";
 import { ScoreBadge } from "./ScoreBadge";
 
@@ -20,6 +21,8 @@ export function RankingTable({ type, rows }: RankingTableProps) {
             <th>現在値</th>
             <th>スコア</th>
             <th>口座</th>
+            <th>投資期間</th>
+            <th>目的</th>
             <th>通知</th>
             <th>コメント</th>
             <th>詳細</th>
@@ -41,6 +44,8 @@ export function RankingTable({ type, rows }: RankingTableProps) {
                   <ScoreBadge label={block?.label ?? "データ不足"} score={score} />
                 </td>
                 <td>{row.holding?.accountType ?? "WATCH_ONLY"}</td>
+                <td>{investmentHorizonLabels[row.holding?.investmentHorizon ?? "MEDIUM"]}</td>
+                <td>{positionPurposeLabels[row.holding?.positionPurpose ?? "WATCH"]}</td>
                 <td>{row.alertSetting?.notifyEnabled ? "有効" : "無効"}</td>
                 <td className="commentCell">{block?.comment ?? "データ不足のため判定信頼度は低めです。"}</td>
                 <td>

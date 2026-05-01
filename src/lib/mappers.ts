@@ -1,4 +1,5 @@
-import type { AlertSetting, Holding, NotificationLog, PriceSnapshot, ScoringResult, Stock } from "./types";
+import { normalizeInvestmentHorizon, normalizePositionPurpose } from "./strategy";
+import type { AlertSetting, Holding, NotificationLog, PriceSnapshot, RiskLimit, ScoringResult, Stock } from "./types";
 
 export function mapStock(row: Record<string, any>): Stock {
   return {
@@ -16,13 +17,29 @@ export function mapStock(row: Record<string, any>): Stock {
 }
 
 export function mapHolding(row: Record<string, any>): Holding {
+  const tags = Array.isArray(row.stocks?.tags) ? row.stocks.tags : [];
+  const accountType = row.account_type;
   return {
     id: row.id,
     stockId: row.stock_id,
-    accountType: row.account_type,
+    accountType,
+    investmentHorizon: normalizeInvestmentHorizon(row.investment_horizon, accountType, tags),
+    positionPurpose: normalizePositionPurpose(row.position_purpose, accountType, tags),
     quantity: Number(row.quantity ?? 0),
     averagePrice: row.average_price === null ? null : Number(row.average_price),
     memo: row.memo,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function mapRiskLimit(row: Record<string, any>): RiskLimit {
+  return {
+    id: row.id,
+    stockId: row.stock_id,
+    maxInvestmentAmount: row.max_investment_amount === null ? null : Number(row.max_investment_amount),
+    maxPortfolioWeight: row.max_portfolio_weight === null ? null : Number(row.max_portfolio_weight),
+    warningEnabled: Boolean(row.warning_enabled),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -81,5 +98,11 @@ export function mapScoringResult(row: Record<string, any>): ScoringResult | null
     return null;
   }
 
-  return row.scores_json as ScoringResult;
+  const score = row.scores_json as ScoringResult;
+  return {
+    ...score,
+    doNotBuyReasons: score.doNotBuyReasons ?? [],
+    overallLabel: score.overallLabel ?? score.buyScore?.label ?? "監視のみ",
+    positionProfitPercent: score.positionProfitPercent ?? null
+  };
 }

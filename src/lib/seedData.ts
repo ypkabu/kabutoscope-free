@@ -1,4 +1,5 @@
-import type { AlertSetting, Holding, Stock } from "./types";
+import { normalizeInvestmentHorizon, normalizePositionPurpose } from "./strategy";
+import type { AccountType, AlertSetting, Holding, Stock } from "./types";
 
 const now = "2026-04-30T00:00:00.000Z";
 
@@ -198,80 +199,40 @@ export const seedStocks: Stock[] = [
 ];
 
 const idFor = (symbol: string) => seedStocks.find((stock) => stock.symbol === symbol)?.id ?? "";
+const holdingFor = (
+  id: string,
+  symbol: string,
+  accountType: AccountType,
+  memo: string,
+  quantity = 0,
+  averagePrice: number | null = null
+): Holding => {
+  const stock = seedStocks.find((item) => item.symbol === symbol);
+  const tags = stock?.tags ?? [];
+  return {
+    id,
+    stockId: idFor(symbol),
+    accountType,
+    investmentHorizon: normalizeInvestmentHorizon(undefined, accountType, tags),
+    positionPurpose: normalizePositionPurpose(undefined, accountType, tags),
+    quantity,
+    averagePrice,
+    memo,
+    createdAt: now,
+    updatedAt: now
+  };
+};
 
 export const seedHoldings: Holding[] = [
-  {
-    id: "10000000-0000-0000-0000-000000000001",
-    stockId: idFor("9434.T"),
-    accountType: "NISA",
-    quantity: 0,
-    averagePrice: null,
-    memo: "配当・優待・長期安定性を重視する監視候補",
-    createdAt: now,
-    updatedAt: now
-  },
-  {
-    id: "10000000-0000-0000-0000-000000000002",
-    stockId: idFor("9432.T"),
-    accountType: "NISA",
-    quantity: 0,
-    averagePrice: null,
-    memo: "通信インフラの長期監視候補",
-    createdAt: now,
-    updatedAt: now
-  },
-  {
-    id: "10000000-0000-0000-0000-000000000003",
-    stockId: idFor("7974.T"),
-    accountType: "NISA",
-    quantity: 0,
-    averagePrice: null,
-    memo: "IPとゲーム事業の長期成長を監視",
-    createdAt: now,
-    updatedAt: now
-  },
-  {
-    id: "10000000-0000-0000-0000-000000000004",
-    stockId: idFor("SP500_FUND"),
-    accountType: "NISA",
-    quantity: 0,
-    averagePrice: null,
-    memo: "初版では手動監視の投資信託枠",
-    createdAt: now,
-    updatedAt: now
-  },
-  {
-    id: "10000000-0000-0000-0000-000000000005",
-    stockId: idFor("6526.T"),
-    accountType: "TOKUTEI",
-    quantity: 0,
-    averagePrice: null,
-    memo: "短中期の値動きとテーマ性を監視",
-    createdAt: now,
-    updatedAt: now
-  },
-  {
-    id: "10000000-0000-0000-0000-000000000006",
-    stockId: idFor("6857.T"),
-    accountType: "TOKUTEI",
-    quantity: 0,
-    averagePrice: null,
-    memo: "半導体テーマの短中期候補",
-    createdAt: now,
-    updatedAt: now
-  },
+  holdingFor("10000000-0000-0000-0000-000000000001", "9434.T", "NISA", "配当・優待・長期安定性を重視する監視候補"),
+  holdingFor("10000000-0000-0000-0000-000000000002", "9432.T", "NISA", "通信インフラの長期監視候補"),
+  holdingFor("10000000-0000-0000-0000-000000000003", "7974.T", "NISA", "IPとゲーム事業の長期成長を監視"),
+  holdingFor("10000000-0000-0000-0000-000000000004", "SP500_FUND", "NISA", "初版では手動監視の投資信託枠"),
+  holdingFor("10000000-0000-0000-0000-000000000005", "6526.T", "TOKUTEI", "短中期の値動きとテーマ性を監視"),
+  holdingFor("10000000-0000-0000-0000-000000000006", "6857.T", "TOKUTEI", "半導体テーマの短中期候補"),
   ...seedStocks
     .filter((stock) => !["9434.T", "9432.T", "7974.T", "SP500_FUND", "6526.T", "6857.T"].includes(stock.symbol))
-    .map((stock, index) => ({
-      id: `10000000-0000-0000-0000-${String(index + 7).padStart(12, "0")}`,
-      stockId: stock.id,
-      accountType: "WATCH_ONLY" as const,
-      quantity: 0,
-      averagePrice: null,
-      memo: "追加監視候補",
-      createdAt: now,
-      updatedAt: now
-    }))
+    .map((stock, index) => holdingFor(`10000000-0000-0000-0000-${String(index + 7).padStart(12, "0")}`, stock.symbol, "WATCH_ONLY", "追加監視候補"))
 ];
 
 const alertRows: Array<[string, number, number, number, number]> = [
