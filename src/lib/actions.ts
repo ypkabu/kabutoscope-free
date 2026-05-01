@@ -141,13 +141,22 @@ export async function addJournalAction(formData: FormData) {
   const supabase = createServiceSupabaseClient();
   if (!supabase) throw new Error("Supabaseのサービスロール設定がありません。");
   const symbol = String(formData.get("symbol") ?? "");
+  const returnTo = String(formData.get("returnTo") ?? (symbol ? `/stocks/${encodeURIComponent(symbol)}` : "/journal"));
+  const price = numberOrNull(formData.get("price"));
+  const quantity = numberOrNull(formData.get("quantity"));
+  const errors: string[] = [];
+  if (price !== null && price < 0) errors.push("価格は0以上で入力してください。");
+  if (quantity !== null && quantity < 0) errors.push("数量は0以上で入力してください。");
+  if (errors.length > 0) {
+    redirect(`${returnTo}?journalError=${encodeURIComponent(errors.join(" / "))}`);
+  }
   const { error } = await supabase.from("trade_journal").insert({
     stock_id: String(formData.get("stockId") ?? "") || null,
     symbol,
     action_type: String(formData.get("actionType") ?? "REVIEW"),
     account_type: String(formData.get("accountType") ?? "TOKUTEI"),
-    price: numberOrNull(formData.get("price")),
-    quantity: numberOrNull(formData.get("quantity")),
+    price,
+    quantity,
     reason: String(formData.get("reason") ?? "") || null,
     expected_scenario: String(formData.get("expectedScenario") ?? "") || null,
     exit_condition: String(formData.get("exitCondition") ?? "") || null,
@@ -158,7 +167,7 @@ export async function addJournalAction(formData: FormData) {
   if (error) throw error;
   revalidatePath("/journal");
   revalidatePath(`/stocks/${encodeURIComponent(symbol)}`);
-  redirect(symbol ? `/stocks/${encodeURIComponent(symbol)}?journal=1` : "/journal?saved=1");
+  redirect(`${returnTo}?journal=1`);
 }
 
 function validatePortfolioSettings(settings: PortfolioSettings) {

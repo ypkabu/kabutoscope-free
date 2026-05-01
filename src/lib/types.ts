@@ -111,7 +111,7 @@ export type TradeJournal = {
   stockId: string | null;
   symbol: string;
   actionType: TradeActionType;
-  accountType: Exclude<AccountType, "WATCH_ONLY">;
+  accountType: AccountType;
   price: number | null;
   quantity: number | null;
   reason: string | null;

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { JournalForm } from "@/components/JournalForm";
 import { ScoreBadge } from "@/components/ScoreBadge";
-import { addJournalAction } from "@/lib/actions";
 import { formatDateTime, formatPercent, formatPrice } from "@/lib/format";
 import { getStockOverviewBySymbol } from "@/lib/repositories";
 import { investmentHorizonLabels, positionPurposeLabels, strategyDescription } from "@/lib/strategy";
@@ -10,8 +10,9 @@ import type { ScoreBlock } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function StockDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
+export default async function StockDetailPage({ params, searchParams }: { params: Promise<{ symbol: string }>; searchParams: Promise<{ journal?: string; journalError?: string }> }) {
   const { symbol: rawSymbol } = await params;
+  const query = await searchParams;
   const symbol = decodeURIComponent(rawSymbol);
   const overview = await getStockOverviewBySymbol(symbol);
 
@@ -126,30 +127,20 @@ export default async function StockDetailPage({ params }: { params: Promise<{ sy
 
       <section className="card" style={{ marginTop: 16 }}>
         <h2>判断メモを追加</h2>
-        <form className="formGrid" action={addJournalAction}>
-          <input type="hidden" name="stockId" value={overview.stock.id} />
-          <input type="hidden" name="symbol" value={overview.stock.symbol} />
-          <label>actionType
-            <select name="actionType" defaultValue="BUY_PLAN">
-              <option value="BUY_PLAN">買う前の計画</option>
-              <option value="BUY">買い記録</option>
-              <option value="SELL_PLAN">売る前の計画</option>
-              <option value="SELL">売り記録</option>
-              <option value="HOLD">継続保有</option>
-              <option value="REVIEW">見直し</option>
-            </select>
-          </label>
-          <label>accountType<select name="accountType" defaultValue={overview.holding?.accountType === "NISA" ? "NISA" : "TOKUTEI"}><option value="NISA">NISA</option><option value="TOKUTEI">TOKUTEI</option></select></label>
-          <label>価格<input name="price" type="number" step="0.01" defaultValue={overview.latestSnapshot?.currentPrice ?? undefined} /></label>
-          <label>数量<input name="quantity" type="number" step="0.01" /></label>
-          <label>なぜこの銘柄を買う/見直すのか<textarea name="reason" /></label>
-          <label>期待シナリオ<textarea name="expectedScenario" /></label>
-          <label>見直し条件<textarea name="exitCondition" /></label>
-          <label>利確条件<textarea name="takeProfitCondition" /></label>
-          <label>損切り条件<textarea name="stopLossCondition" /></label>
-          <label>感情タグ<select name="emotionTag" defaultValue="planned"><option value="calm">落ち着いている</option><option value="fear_of_missing_out">置いていかれ不安</option><option value="panic">焦り</option><option value="planned">計画通り</option><option value="revenge_trade">取り返したい気持ち</option><option value="uncertain">迷い</option></select></label>
-          <button type="submit">判断メモを保存</button>
-        </form>
+        {query.journal ? <p className="notice">判断メモを保存しました。</p> : null}
+        {query.journalError ? <p className="notice">{query.journalError}</p> : null}
+        <JournalForm
+          stockId={overview.stock.id}
+          symbol={overview.stock.symbol}
+          accountType={overview.holding?.accountType ?? "WATCH_ONLY"}
+          investmentHorizon={overview.holding?.investmentHorizon ?? "MEDIUM"}
+          positionPurpose={overview.holding?.positionPurpose ?? "WATCH"}
+          currentPrice={overview.latestSnapshot?.currentPrice}
+          buyBelow={overview.alertSetting?.buyBelow}
+          takeProfit={overview.alertSetting?.takeProfit}
+          strongTakeProfit={overview.alertSetting?.strongTakeProfit}
+          stopLoss={overview.alertSetting?.stopLoss}
+        />
       </section>
 
       <section className="card" style={{ marginTop: 16 }}>

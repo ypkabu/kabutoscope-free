@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { addJournalAction } from "@/lib/actions";
+import { JournalForm } from "@/components/JournalForm";
 import { formatDateTime, formatPrice } from "@/lib/format";
+import { accountTypeLabels, actionTypeLabels, emotionTagLabels } from "@/lib/journalLabels";
 import { createBrowserSafeSupabaseClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-export default async function JournalPage() {
+export default async function JournalPage({ searchParams }: { searchParams: Promise<{ journal?: string; journalError?: string }> }) {
+  const params = await searchParams;
   const supabase = createBrowserSafeSupabaseClient();
   const { data } = supabase
     ? await supabase.from("trade_journal").select("*").order("created_at", { ascending: false }).limit(50)
@@ -19,40 +21,13 @@ export default async function JournalPage() {
           <p className="muted">なぜ買うのか、どこで見直すのかを記録します。投資助言ではなく、自分用の振り返りです。</p>
         </div>
       </div>
+      {params.journal ? <p className="notice">判断メモを保存しました。</p> : null}
+      {params.journalError ? <p className="notice">{params.journalError}</p> : null}
       <section className="grid twoCol">
-        <form className="card formGrid" action={addJournalAction}>
+        <section className="card">
           <h2>判断メモを追加</h2>
-          <label>symbol<input name="symbol" placeholder="6526.T" required /></label>
-          <label>actionType
-            <select name="actionType" defaultValue="BUY_PLAN">
-              <option value="BUY_PLAN">買う前の計画</option>
-              <option value="BUY">買い記録</option>
-              <option value="SELL_PLAN">売る前の計画</option>
-              <option value="SELL">売り記録</option>
-              <option value="HOLD">継続保有</option>
-              <option value="REVIEW">見直し</option>
-            </select>
-          </label>
-          <label>accountType<select name="accountType"><option value="NISA">NISA</option><option value="TOKUTEI">TOKUTEI</option></select></label>
-          <label>価格<input name="price" type="number" step="0.01" /></label>
-          <label>数量<input name="quantity" type="number" step="0.01" /></label>
-          <label>なぜこの銘柄を買うのか<textarea name="reason" /></label>
-          <label>期待シナリオ<textarea name="expectedScenario" /></label>
-          <label>どこまで下がったら見直すのか<textarea name="exitCondition" /></label>
-          <label>どこまで上がったら利確するのか<textarea name="takeProfitCondition" /></label>
-          <label>損切り条件<textarea name="stopLossCondition" /></label>
-          <label>感情タグ
-            <select name="emotionTag" defaultValue="planned">
-              <option value="calm">落ち着いている</option>
-              <option value="fear_of_missing_out">置いていかれ不安</option>
-              <option value="panic">焦り</option>
-              <option value="planned">計画通り</option>
-              <option value="revenge_trade">取り返したい気持ち</option>
-              <option value="uncertain">迷い</option>
-            </select>
-          </label>
-          <button type="submit">保存</button>
-        </form>
+          <JournalForm />
+        </section>
 
         <section className="card">
           <h2>最近の記録</h2>
@@ -60,8 +35,13 @@ export default async function JournalPage() {
             <ul className="reasonList">
               {(data ?? []).map((row: any) => (
                 <li key={row.id}>
-                  <Link href={`/stocks/${encodeURIComponent(row.symbol)}`}>{row.symbol}</Link> / {row.action_type} / {formatPrice(row.price)} / {formatDateTime(row.created_at)}
-                  <span className="block muted">{row.reason}</span>
+                  <Link href={`/stocks/${encodeURIComponent(row.symbol)}`}>{row.symbol}</Link> / {actionTypeLabels[row.action_type as keyof typeof actionTypeLabels] ?? row.action_type} / {accountTypeLabels[row.account_type as keyof typeof accountTypeLabels] ?? row.account_type} / {row.price === null ? "価格未入力" : formatPrice(row.price)} / 数量: {row.quantity ?? "未入力"} / {formatDateTime(row.created_at)}
+                  <span className="block muted">理由: {row.reason ?? "未入力"}</span>
+                  <span className="block muted">期待シナリオ: {row.expected_scenario ?? "未入力"}</span>
+                  <span className="block muted">見直し条件: {row.exit_condition ?? "未入力"}</span>
+                  <span className="block muted">利確条件: {row.take_profit_condition ?? "未入力"}</span>
+                  <span className="block muted">損切り条件: {row.stop_loss_condition ?? "未入力"}</span>
+                  <span className="block muted">感情: {emotionTagLabels[row.emotion_tag as keyof typeof emotionTagLabels] ?? "未入力"}</span>
                 </li>
               ))}
             </ul>
