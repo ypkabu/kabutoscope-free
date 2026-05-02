@@ -19,7 +19,11 @@ export function RankingTable({ type, rows }: RankingTableProps) {
             <th>順位</th>
             <th>銘柄</th>
             <th>現在値</th>
+            <th>総合判定</th>
             <th>スコア</th>
+            <th>買わない理由</th>
+            <th>FOMO</th>
+            <th>適合度</th>
             <th>口座</th>
             <th>投資期間</th>
             <th>目的</th>
@@ -40,9 +44,13 @@ export function RankingTable({ type, rows }: RankingTableProps) {
                   <span className="muted block">{row.stock.name}</span>
                 </td>
                 <td>{formatPrice(row.latestSnapshot?.currentPrice, row.latestSnapshot?.currency)}</td>
+                <td>{row.scoring?.finalDecision ?? row.scoring?.overallLabel ?? "データ不足"}</td>
                 <td>
                   <ScoreBadge label={block?.label ?? "データ不足"} score={score} />
                 </td>
+                <td>{row.scoring?.doNotBuyScore?.score ?? 0}</td>
+                <td>{row.scoring?.fomoRiskScore?.score ?? 0}</td>
+                <td>{row.scoring?.portfolioFitScore?.score ?? 0}</td>
                 <td>{row.holding?.accountType ?? "WATCH_ONLY"}</td>
                 <td>{investmentHorizonLabels[row.holding?.investmentHorizon ?? "MEDIUM"]}</td>
                 <td>{positionPurposeLabels[row.holding?.positionPurpose ?? "WATCH"]}</td>
@@ -67,5 +75,12 @@ function scoreBlock(row: StockOverview, type: string) {
   if (type === "buy") return row.scoring.buyScore;
   if (type === "sell") return row.scoring.sellScore;
   if (type === "risk") return row.scoring.riskScore;
+  if (type === "smart") return row.scoring.decisionConfidenceScore;
+  if (type === "do-not-buy") return row.scoring.doNotBuyScore;
+  if (type === "fomo-risk") return row.scoring.fomoRiskScore;
+  if (type === "averaging-down-risk") return row.scoring.averagingDownRiskScore;
+  if (type === "portfolio-fit") return row.scoring.portfolioFitScore;
+  if (type === "short-term-sell") return row.scoring.sellScore;
+  if (type === "long-term-review") return row.scoring.riskScore.score > row.scoring.sellScore.score ? row.scoring.riskScore : row.scoring.sellScore;
   return row.scoring.confidenceScore;
 }

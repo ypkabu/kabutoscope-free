@@ -1,8 +1,11 @@
 import { calculateIndicators } from "./indicators";
+import { scoreThresholds, typeAdjustments } from "@/config/scoringWeights";
 import type {
   AlertSetting,
   HistoricalPrice,
   Holding,
+  MarketContext,
+  PortfolioSettings,
   QuoteResult,
   RiskLimit,
   ScoreBlock,
@@ -16,6 +19,9 @@ type ScoreInput = {
   holding: Holding | null;
   alertSetting: AlertSetting | null;
   riskLimit?: RiskLimit | null;
+  marketContext?: MarketContext | null;
+  portfolioSettings?: PortfolioSettings | null;
+  recentBuyJournalCount?: number;
   quote: QuoteResult | null;
   historicalPrices: HistoricalPrice[];
 };
@@ -24,6 +30,7 @@ type ScoreDraft = {
   score: number;
   positiveFactors: string[];
   negativeFactors: string[];
+  cautionFactors: string[];
   reasons: string[];
 };
 
@@ -31,15 +38,43 @@ export function calculateStockScore(input: ScoreInput): ScoringResult {
   const indicators = calculateIndicators(input.quote, input.historicalPrices, input.alertSetting);
   const positionProfitPercent = calculatePositionProfitPercent(input.holding, input.quote);
   const riskDraft = riskScore(input.stock, input.holding, indicators, input.quote, input.alertSetting, positionProfitPercent);
-  const riskBlock = toBlock(riskDraft, labelRisk(riskDraft.score), buildRiskComment(riskDraft.score, riskDraft.positiveFactors));
 
   const nisaDraft = nisaScore(input.stock, input.holding, indicators, input.alertSetting, riskDraft.score);
   const tokuteiDraft = tokuteiScore(input.stock, input.holding, indicators, input.alertSetting, riskDraft.score);
   const buyDraft = buyScore(input.stock, input.holding, indicators, input.quote, input.alertSetting, riskDraft.score);
   const sellDraft = sellScore(input.stock, input.holding, indicators, input.quote, input.alertSetting, positionProfitPercent);
   const confidenceDraft = confidenceScore(input.quote, input.historicalPrices, input.alertSetting, input.holding, indicators);
-  const doNotBuyReasons = buildDoNotBuyReasons(input.stock, input.holding, indicators, input.alertSetting, riskDraft.score, input.riskLimit);
-  const overallLabel = decideOverallLabel(buyDraft.score, sellDraft.score, riskDraft.score, doNotBuyReasons, input.holding, indicators);
+  const marketDraft = marketScore(input.stock, input.marketContext);
+  applyMarketAdjustment(input.stock, buyDraft, riskDraft, input.marketContext);
+  const timingDraft = timingScore(input.stock, input.holding, indicators, input.alertSetting, buyDraft.score, riskDraft.score);
+  const fomoDraft = fomoRiskScore(input.stock, indicators, input.alertSetting, input.quote);
+  const averagingDownDraft = averagingDownRiskScore(input.holding, indicators, positionProfitPercent, riskDraft.score, input.riskLimit, input.recentBuyJournalCount ?? 0);
+  const portfolioFitDraft = portfolioFitScore(input.stock, input.holding, indicators, input.riskLimit, input.portfolioSettings);
+  const doNotBuyReasons = buildDoNotBuyReasons(
+    input.stock,
+    input.holding,
+    indicators,
+    input.alertSetting,
+    riskDraft.score,
+    input.riskLimit,
+    fomoDraft.score,
+    averagingDownDraft.score,
+    portfolioFitDraft.score,
+    input.marketContext,
+    input.portfolioSettings
+  );
+  const doNotBuyDraft = doNotBuyScore(doNotBuyReasons, riskDraft.score, fomoDraft.score, averagingDownDraft.score, portfolioFitDraft.score);
+  const decisionConfidenceDraft = decisionConfidenceScore(confidenceDraft.score, marketDraft.score, doNotBuyReasons.length, input.marketContext);
+  const finalDecision = decideFinalDecision(
+    buyDraft.score,
+    sellDraft.score,
+    riskDraft.score,
+    doNotBuyDraft.score,
+    portfolioFitDraft.score,
+    input.holding,
+    indicators
+  );
+  const scenarios = buildScenarios(input.stock, input.alertSetting, input.holding, indicators);
 
   return {
     nisaScore: toBlock(nisaDraft, labelNisa(nisaDraft.score), buildNisaComment(nisaDraft.score, input.stock.tags)),
@@ -50,14 +85,27 @@ export function calculateStockScore(input: ScoreInput): ScoringResult {
     ),
     buyScore: toBlock(buyDraft, labelBuy(buyDraft.score), buildBuyComment(buyDraft.score, riskDraft.score)),
     sellScore: toBlock(sellDraft, labelSell(sellDraft.score), buildSellComment(sellDraft.score)),
-    riskScore: riskBlock,
+    riskScore: toBlock(riskDraft, labelRisk(riskDraft.score), buildRiskComment(riskDraft.score, riskDraft.positiveFactors)),
     confidenceScore: toBlock(
       confidenceDraft,
       confidenceDraft.score >= 75 ? "判定信頼度高め" : confidenceDraft.score >= 50 ? "判定信頼度ふつう" : "データ不足",
       confidenceDraft.score < 60 ? "データ不足のため判定信頼度は低めです。" : "主要データが揃っており、ルール判定の材料は比較的十分です。"
     ),
+    marketScore: toBlock(marketDraft, labelMarket(marketDraft.score), buildMarketComment(marketDraft, input.stock)),
+    timingScore: toBlock(timingDraft, labelTiming(timingDraft.score), buildTimingComment(timingDraft.score, riskDraft.score)),
+    fomoRiskScore: toBlock(fomoDraft, labelFomo(fomoDraft.score), buildFomoComment(fomoDraft.score)),
+    averagingDownRiskScore: toBlock(averagingDownDraft, labelAveragingDown(averagingDownDraft.score), buildAveragingDownComment(averagingDownDraft.score)),
+    portfolioFitScore: toBlock(portfolioFitDraft, labelPortfolioFit(portfolioFitDraft.score), buildPortfolioFitComment(portfolioFitDraft.score)),
+    decisionConfidenceScore: toBlock(
+      decisionConfidenceDraft,
+      decisionConfidenceDraft.score >= 75 ? "総合判定の信頼度高め" : decisionConfidenceDraft.score >= 50 ? "総合判定の信頼度ふつう" : "総合判定はデータ不足",
+      decisionConfidenceDraft.score < 60 ? "一部データが不足しているため、手動確認を優先してください。" : "複数材料が揃っており、候補整理に使いやすい状態です。"
+    ),
+    doNotBuyScore: toBlock(doNotBuyDraft, labelDoNotBuy(doNotBuyDraft.score), buildDoNotBuyComment(doNotBuyDraft.score, doNotBuyReasons)),
     doNotBuyReasons,
-    overallLabel,
+    overallLabel: finalDecision,
+    finalDecision,
+    scenarios,
     positionProfitPercent,
     indicators,
     generatedAt: new Date().toISOString()
@@ -319,8 +367,150 @@ function confidenceScore(
   return finish(draft);
 }
 
+function marketScore(stock: Stock, marketContext?: MarketContext | null): ScoreDraft {
+  const draft = baseDraft(marketContext?.score ?? 55);
+  if (!marketContext) {
+    addCaution(draft, 0, "相場指数データは未取得のため中立扱い");
+    return finish(draft);
+  }
+
+  for (const reason of marketContext.positiveFactors) addPositive(draft, 0, reason);
+  for (const reason of marketContext.negativeFactors) addNegative(draft, 0, reason);
+  for (const reason of marketContext.cautionFactors) addCaution(draft, 0, reason);
+
+  if ((stock.tags.includes("semiconductor") || stock.tags.includes("ai")) && marketContext.semiconductorWeak) {
+    addNegative(draft, typeAdjustments.semiconductor.marketSensitivity, "半導体指数が弱く、半導体・AI銘柄は慎重");
+  }
+  if (stock.country === "JP" && marketContext.jpWeak) addNegative(draft, 8, "日本株指数が弱い");
+  if (stock.country === "US" && marketContext.usWeak) addNegative(draft, 8, "米国株指数が弱い");
+
+  return finish(draft);
+}
+
+function applyMarketAdjustment(stock: Stock, buyDraft: ScoreDraft, riskDraft: ScoreDraft, marketContext?: MarketContext | null) {
+  if (!marketContext) return;
+  if ((stock.tags.includes("semiconductor") || stock.tags.includes("ai")) && marketContext.semiconductorWeak) {
+    addNegative(buyDraft, 8, "半導体地合いが弱いため買い判定を控えめに調整");
+    addCaution(riskDraft, 6, "半導体地合い悪化による変動リスク");
+  }
+  if (stock.country === "JP" && marketContext.jpWeak) addNegative(buyDraft, 4, "日本株全体の地合いが弱い");
+  if (stock.country === "US" && marketContext.usWeak) addNegative(buyDraft, 4, "米国株全体の地合いが弱い");
+}
+
+function timingScore(
+  stock: Stock,
+  holding: Holding | null,
+  indicators: TechnicalIndicators,
+  alertSetting: AlertSetting | null,
+  buyScoreValue: number,
+  riskScoreValue: number
+): ScoreDraft {
+  const draft = baseDraft(45);
+  if (buyScoreValue >= 75) addPositive(draft, 18, "買い候補スコアが高い");
+  if (indicators.distanceToBuyBelow !== null && Math.abs(indicators.distanceToBuyBelow) <= 5) addPositive(draft, 15, "買いライン付近");
+  if (indicators.return5d !== null && indicators.return5d < 0 && indicators.return5d > -8) addPositive(draft, 8, "短期下落後で反発確認候補");
+  if (indicators.volumeRatio !== null && indicators.volumeRatio >= 1.2) addPositive(draft, 7, "出来高が増えている");
+  if (riskScoreValue >= 75) addNegative(draft, 18, "危険度が高くタイミングは慎重");
+  if (indicators.return20d !== null && indicators.return20d >= 20) addNegative(draft, 15, "20日で上がりすぎ");
+  if (alertSetting?.buyBelow && indicators.currentPrice !== null && indicators.currentPrice > alertSetting.buyBelow * 1.2) {
+    addNegative(draft, 15, "買いラインよりかなり上");
+  }
+  if (holding?.positionPurpose === "WATCH") addNegative(draft, 5, "監視のみ設定のため実行タイミングは控えめ");
+  if (stock.tags.includes("game")) addCaution(draft, 3, "ゲーム株はタイトル・IP材料の確認が必要");
+  return finish(draft);
+}
+
+function fomoRiskScore(stock: Stock, indicators: TechnicalIndicators, alertSetting: AlertSetting | null, quote: QuoteResult | null): ScoreDraft {
+  const draft = baseDraft(20);
+  const currentPrice = quote?.currentPrice ?? indicators.currentPrice;
+  if (indicators.return5d !== null && indicators.return5d >= 10) addCaution(draft, 18, "5日で大きく上昇");
+  if (indicators.return20d !== null && indicators.return20d >= 20) addCaution(draft, 18, "20日で大きく上昇");
+  if (alertSetting?.buyBelow && currentPrice !== null && currentPrice > alertSetting.buyBelow * 1.2) addCaution(draft, 15, "買いラインより大きく上");
+  if (indicators.ma25 !== null && currentPrice !== null && currentPrice > indicators.ma25 * 1.12) addCaution(draft, 12, "25日線より大きく上");
+  if (indicators.volumeRatio !== null && indicators.volumeRatio > 1.8 && indicators.return5d !== null && indicators.return5d > 4) addCaution(draft, 12, "出来高急増後に上昇");
+  if (alertSetting?.strongTakeProfit && currentPrice !== null && currentPrice >= alertSetting.strongTakeProfit * 0.95) addCaution(draft, 12, "強め利確ラインに近い");
+  if (stock.tags.includes("high_volatility")) addCaution(draft, 6, "値動きが荒い銘柄");
+  if (stock.tags.includes("defense")) addCaution(draft, typeAdjustments.defense.fomoAfterRally, "防衛・重工テーマは急騰後の追いかけに注意");
+  if (stock.tags.includes("semiconductor") || stock.tags.includes("ai")) addCaution(draft, 6, "半導体・AIテーマは人気化後の高値追いに注意");
+  return finish(draft);
+}
+
+function averagingDownRiskScore(
+  holding: Holding | null,
+  indicators: TechnicalIndicators,
+  positionProfitPercent: number | null,
+  riskScoreValue: number,
+  riskLimit?: RiskLimit | null,
+  recentBuyJournalCount = 0
+): ScoreDraft {
+  const draft = baseDraft(15);
+  const quantity = holding?.quantity ?? 0;
+  const investedAmount = quantity * (indicators.currentPrice ?? holding?.averagePrice ?? 0);
+  if (quantity > 0) addCaution(draft, 10, "すでに同銘柄を保有");
+  if (positionProfitPercent !== null && positionProfitPercent < 0) addCaution(draft, 15, "含み損がある");
+  if (riskLimit?.maxInvestmentAmount && investedAmount >= riskLimit.maxInvestmentAmount * 0.8) addCaution(draft, 15, "最大投資額の80%以上");
+  if (riskScoreValue >= 75) addCaution(draft, 18, "危険度が高い");
+  if (belowMa(indicators, "ma25") && belowMa(indicators, "ma75")) addCaution(draft, 14, "下落トレンド中");
+  if (recentBuyJournalCount >= 2) addCaution(draft, 12, "直近で同銘柄の買い計画メモが複数ある");
+  if (holding?.investmentHorizon === "LONG" && holding.positionPurpose === "CORE") addNegative(draft, 8, "コア長期枠は短期ナンピンとは別管理");
+  return finish(draft);
+}
+
+function portfolioFitScore(
+  stock: Stock,
+  holding: Holding | null,
+  indicators: TechnicalIndicators,
+  riskLimit?: RiskLimit | null,
+  portfolioSettings?: PortfolioSettings | null
+): ScoreDraft {
+  const draft = baseDraft(60);
+  const quantity = holding?.quantity ?? 0;
+  const investedAmount = quantity * (indicators.currentPrice ?? holding?.averagePrice ?? 0);
+  const cashRatio = portfolioSettings && portfolioSettings.totalBudget > 0 ? portfolioSettings.cashAmount / portfolioSettings.totalBudget : null;
+
+  if (holding?.accountType === "NISA" && holding.investmentHorizon === "LONG") addPositive(draft, 10, "NISAと長期設定が合っている");
+  if (holding?.accountType === "TOKUTEI" && holding.investmentHorizon === "SHORT") addPositive(draft, 8, "特定口座と短期設定が合っている");
+  if (holding?.positionPurpose === "CORE" || holding?.positionPurpose === "INCOME") addPositive(draft, 8, "ポートフォリオの土台・安定枠");
+  if (stock.tags.includes("sp500") || stock.tags.includes("index")) addPositive(draft, typeAdjustments.index.longCoreBonus, "インデックス土台として使いやすい");
+  if (cashRatio !== null && cashRatio >= 0.2) addPositive(draft, 10, "現金比率に余裕がある");
+  if (cashRatio !== null && cashRatio < 0.1) addNegative(draft, 20, "現金比率が低い");
+  if (riskLimit?.maxInvestmentAmount && investedAmount >= riskLimit.maxInvestmentAmount) addNegative(draft, 20, "最大投資額を超えている");
+  else if (riskLimit?.maxInvestmentAmount && investedAmount >= riskLimit.maxInvestmentAmount * 0.8) addNegative(draft, 10, "最大投資額に近い");
+  if (portfolioSettings?.totalBudget && riskLimit?.maxPortfolioWeight && investedAmount / portfolioSettings.totalBudget > riskLimit.maxPortfolioWeight) {
+    addNegative(draft, 18, "最大ポートフォリオ比率を超えている");
+  }
+  if (stock.tags.includes("high_volatility") && holding?.positionPurpose === "CORE") addNegative(draft, 12, "高ボラ銘柄をコアにするには注意");
+  if (holding?.positionPurpose === "WATCH") addNegative(draft, 8, "監視のみ設定");
+  return finish(draft);
+}
+
+function doNotBuyScore(
+  reasons: string[],
+  riskScoreValue: number,
+  fomoRiskScoreValue: number,
+  averagingDownRiskScoreValue: number,
+  portfolioFitScoreValue: number
+): ScoreDraft {
+  const draft = baseDraft(reasons.length * 8);
+  for (const reason of reasons) addCaution(draft, 0, reason);
+  if (riskScoreValue >= 75) addCaution(draft, 16, "riskScore が高い");
+  if (fomoRiskScoreValue >= 60) addCaution(draft, 14, "fomoRiskScore が高い");
+  if (averagingDownRiskScoreValue >= 60) addCaution(draft, 14, "averagingDownRiskScore が高い");
+  if (portfolioFitScoreValue < 40) addCaution(draft, 16, "portfolioFitScore が低い");
+  return finish(draft);
+}
+
+function decisionConfidenceScore(confidenceScoreValue: number, marketScoreValue: number, doNotBuyReasonCount: number, marketContext?: MarketContext | null): ScoreDraft {
+  const draft = baseDraft(confidenceScoreValue);
+  if (marketContext) addPositive(draft, 8, "相場環境データあり");
+  else addNegative(draft, 8, "相場環境データなし");
+  if (marketScoreValue < 35 || marketScoreValue > 75) addPositive(draft, 4, "相場環境の方向感が判定材料になる");
+  if (doNotBuyReasonCount >= 3) addPositive(draft, 4, "買わない理由が複数あり注意点が明確");
+  return finish(draft);
+}
+
 function baseDraft(score: number): ScoreDraft {
-  return { score, positiveFactors: [], negativeFactors: [], reasons: [] };
+  return { score, positiveFactors: [], negativeFactors: [], cautionFactors: [], reasons: [] };
 }
 
 function addPositive(draft: ScoreDraft, points: number, reason: string) {
@@ -333,6 +523,12 @@ function addNegative(draft: ScoreDraft, points: number, reason: string) {
   draft.score -= points;
   draft.negativeFactors.push(reason);
   draft.reasons.push(`-${points}: ${reason}`);
+}
+
+function addCaution(draft: ScoreDraft, points: number, reason: string) {
+  draft.score += points;
+  draft.cautionFactors.push(reason);
+  draft.reasons.push(`+${points}: ${reason}`);
 }
 
 function addByTags(draft: ScoreDraft, tags: string[], rules: Record<string, [number, string]>) {
@@ -358,6 +554,7 @@ function toBlock(draft: ScoreDraft, label: string, comment: string): ScoreBlock 
     reasons: draft.reasons,
     positiveFactors: draft.positiveFactors,
     negativeFactors: draft.negativeFactors,
+    cautionFactors: draft.cautionFactors,
     comment
   };
 }
@@ -390,16 +587,16 @@ function labelTokutei(score: number) {
 
 function labelBuy(score: number) {
   if (score >= 85) return "強い買い候補";
+  if (score >= 80) return "買い候補";
   if (score >= 75) return "少額なら買い候補";
   if (score >= 70) return "買いライン接近";
-  if (score >= 80) return "買い候補";
   if (score >= 60) return "監視候補";
   return "様子見";
 }
 
 function labelSell(score: number) {
-  if (score >= 80) return "利確優先";
   if (score >= 85) return "強め利確候補";
+  if (score >= 80) return "利確優先";
   if (score >= 70) return "一部利確候補";
   if (score >= 50) return "継続保有";
   return "様子見";
@@ -457,39 +654,56 @@ function buildDoNotBuyReasons(
   indicators: TechnicalIndicators,
   alertSetting: AlertSetting | null,
   riskScoreValue: number,
-  riskLimit?: RiskLimit | null
+  riskLimit?: RiskLimit | null,
+  fomoRiskScoreValue = 0,
+  averagingDownRiskScoreValue = 0,
+  portfolioFitScoreValue = 100,
+  marketContext?: MarketContext | null,
+  portfolioSettings?: PortfolioSettings | null
 ) {
   const reasons: string[] = [];
   if (indicators.return20d !== null && indicators.return20d > 18) reasons.push("短期で上がりすぎ");
   if (belowMa(indicators, "ma75") && indicators.return5d !== null && indicators.return5d < -8) reasons.push("75日線を大きく下回っている");
   if (indicators.volumeRatio !== null && indicators.volumeRatio > 1.8 && indicators.return5d !== null && indicators.return5d < 0) reasons.push("出来高を伴って下落");
   if (riskScoreValue >= 75) reasons.push("riskScore が高すぎる");
+  if (fomoRiskScoreValue >= 60) reasons.push("fomoRiskScore が高い");
+  if (averagingDownRiskScoreValue >= 60) reasons.push("averagingDownRiskScore が高い");
+  if (portfolioFitScoreValue < 40) reasons.push("ポートフォリオ適合度が低い");
   if (indicators.distanceToBuyBelow !== null && indicators.distanceToBuyBelow > 20) reasons.push("買いラインよりかなり上");
   if (stock.tags.includes("high_volatility") && holding?.investmentHorizon === "LONG") reasons.push("長期枠としては値動きが荒い");
   const investedAmount = (holding?.quantity ?? 0) * (indicators.currentPrice ?? holding?.averagePrice ?? 0);
   if (riskLimit?.maxInvestmentAmount && investedAmount >= riskLimit.maxInvestmentAmount * 0.8) reasons.push("最大投資額に近い");
+  const cashRatio = portfolioSettings && portfolioSettings.totalBudget > 0 ? portfolioSettings.cashAmount / portfolioSettings.totalBudget : null;
+  if (cashRatio !== null && cashRatio < 0.1) reasons.push("現金比率が低い");
+  if ((stock.tags.includes("semiconductor") || stock.tags.includes("ai")) && marketContext?.semiconductorWeak) reasons.push("半導体地合いが悪い");
+  if (stock.tags.includes("event_risk")) reasons.push("追加悪材料やイベントリスクを確認したい");
+  if (stock.tags.includes("bank") && stock.tags.includes("event_risk")) reasons.push("不祥事下落のため慎重");
   if (alertSetting?.buyBelow === null || alertSetting?.buyBelow === undefined) reasons.push("買いライン未設定");
   return Array.from(new Set(reasons));
 }
 
-function decideOverallLabel(
+function decideFinalDecision(
   buyScoreValue: number,
   sellScoreValue: number,
   riskScoreValue: number,
-  doNotBuyReasons: string[],
+  doNotBuyScoreValue: number,
+  portfolioFitScoreValue: number,
   holding: Holding | null,
   indicators: TechnicalIndicators
 ) {
-  if (riskScoreValue >= 85) return "撤退検討";
-  if (sellScoreValue >= 80) return "利確優先";
-  if (buyScoreValue >= 85 && riskScoreValue < 55 && doNotBuyReasons.length === 0) return "強い買い候補";
-  if (buyScoreValue >= 75 && riskScoreValue < 70) return "少額なら買い候補";
-  if (buyScoreValue >= 70 && riskScoreValue >= 70) return "買わない理由あり";
-  if (doNotBuyReasons.length > 0) return "買わない理由あり";
+  if (riskScoreValue >= scoreThresholds.highRisk) return "損切り検討";
+  if (sellScoreValue >= scoreThresholds.sellPriority && holding?.investmentHorizon !== "LONG") return "利確優先";
+  if (sellScoreValue >= scoreThresholds.partialProfit) return "一部利確候補";
+  if (doNotBuyScoreValue >= scoreThresholds.doNotBuy) return "買わない理由あり";
+  if (portfolioFitScoreValue < scoreThresholds.portfolioFitCaution) return "計画外購入注意";
+  if (buyScoreValue >= scoreThresholds.strongBuy && riskScoreValue < 55 && doNotBuyScoreValue < 50 && portfolioFitScoreValue >= 60) return "強い買い候補";
+  if (buyScoreValue >= scoreThresholds.smallBuy && riskScoreValue < 70) return "少額なら買い候補";
+  if (buyScoreValue >= 70 && riskScoreValue >= 70) return "反発確認待ち";
   if (indicators.distanceToBuyBelow !== null && indicators.distanceToBuyBelow > 20) return "高値追い注意";
   if (holding?.positionPurpose === "WATCH") return "監視のみ";
   if (buyScoreValue >= 65) return "買いライン接近";
   if (riskScoreValue >= 65) return "反発確認待ち";
+  if (holding && holding.quantity > 0) return "継続保有";
   return "監視のみ";
 }
 
@@ -497,4 +711,130 @@ function buildRiskComment(score: number, positives: string[]) {
   if (score >= 75) return "損切りラインに接近しており、危険度が上がっています。";
   if (positives.some((reason) => reason.includes("75日線"))) return "中期トレンドの崩れに注意しながら監視する状態です。";
   return "通常の監視範囲ですが、価格取得データとアラートラインは継続確認してください。";
+}
+
+function labelMarket(score: number) {
+  if (score >= 70) return "相場環境良好";
+  if (score >= 45) return "相場環境ふつう";
+  return "地合い悪化注意";
+}
+
+function labelTiming(score: number) {
+  if (score >= 80) return "タイミング良好";
+  if (score >= 60) return "少額ならタイミング候補";
+  if (score >= 40) return "待ち";
+  return "タイミング慎重";
+}
+
+function labelFomo(score: number) {
+  if (score >= 80) return "高値追い危険";
+  if (score >= 60) return "FOMO注意";
+  if (score >= 40) return "やや高値追い注意";
+  return "通常";
+}
+
+function labelAveragingDown(score: number) {
+  if (score >= 80) return "追加購入は危険寄り";
+  if (score >= 60) return "ナンピン注意";
+  if (score >= 40) return "買い増し慎重";
+  return "通常";
+}
+
+function labelPortfolioFit(score: number) {
+  if (score >= 80) return "ポートフォリオに合う";
+  if (score >= 60) return "少額なら合う";
+  if (score >= 40) return "やや計画外";
+  return "計画外・慎重";
+}
+
+function labelDoNotBuy(score: number) {
+  if (score >= 85) return "待ち";
+  if (score >= 70) return "買わない理由あり";
+  if (score >= 45) return "注意点あり";
+  return "大きな買わない理由は少なめ";
+}
+
+function buildMarketComment(draft: ScoreDraft, stock: Stock) {
+  if (draft.score < 45 && (stock.tags.includes("semiconductor") || stock.tags.includes("ai"))) {
+    return "半導体指数が弱いため、半導体・AI銘柄の買い判定を慎重にしています。";
+  }
+  if (draft.score < 45) return "相場全体の地合いが弱く、無理な新規購入は待ち寄りで監視します。";
+  if (draft.score >= 70) return "主要指数の状態は比較的良く、相場環境は候補整理の追い風です。";
+  return "相場環境は中立です。銘柄単体のラインとリスクを優先して確認します。";
+}
+
+function buildTimingComment(score: number, riskScoreValue: number) {
+  if (score >= 75 && riskScoreValue < 70) return "買いラインや出来高など、タイミング面の材料は比較的揃っています。";
+  if (riskScoreValue >= 75) return "買いラインに近くても危険度が高いため、反発確認待ちの判定です。";
+  return "タイミング面ではまだ待ちの材料が残っています。";
+}
+
+function buildFomoComment(score: number) {
+  if (score >= 80) return "短期で大きく上昇しており、今から追うと高値掴みになる可能性があります。";
+  if (score >= 60) return "上昇後の焦り買いに注意したい状態です。";
+  return "高値追いリスクは通常範囲です。";
+}
+
+function buildAveragingDownComment(score: number) {
+  if (score >= 80) return "すでに含み損や下落トレンドがあり、買い増しより見直しを優先したい状態です。";
+  if (score >= 60) return "買い増しは慎重に検討し、当初の買い理由が残っているか確認してください。";
+  return "ナンピン危険度は通常範囲です。";
+}
+
+function buildPortfolioFitComment(score: number) {
+  if (score >= 80) return "現在の資金計画や保有目的に合いやすい候補です。";
+  if (score >= 60) return "少額ならポートフォリオに入れやすい候補です。";
+  if (score >= 40) return "やや計画外のため、資金配分とテーマ偏りを確認してください。";
+  return "計画外購入になりやすく、ポートフォリオ上は慎重に見たい候補です。";
+}
+
+function buildDoNotBuyComment(score: number, reasons: string[]) {
+  if (score >= 85) return "買いラインに近くても、買わない理由が強いため待ち寄りです。";
+  if (score >= 70) return `買わない理由があります。${reasons.slice(0, 2).join("、")} を確認してください。`;
+  if (score >= 45) return "注意点はありますが、他のスコアと合わせて候補整理できます。";
+  return "大きな買わない理由は少なめですが、最終判断は自分で確認してください。";
+}
+
+function buildScenarios(stock: Stock, alertSetting: AlertSetting | null, holding: Holding | null, indicators: TechnicalIndicators) {
+  const buy = alertSetting?.buyBelow;
+  const take = alertSetting?.takeProfit;
+  const stop = alertSetting?.stopLoss;
+  const isSemiconductor = stock.tags.includes("semiconductor") || stock.tags.includes("ai");
+  const isTelecomIncome = stock.tags.includes("telecom") || stock.tags.includes("dividend") || stock.tags.includes("shareholder_benefit");
+  const isGame = stock.tags.includes("game") || stock.tags.includes("ip");
+  const isIndex = stock.tags.includes("sp500") || stock.tags.includes("index") || holding?.positionPurpose === "CORE";
+
+  if (isIndex) {
+    return {
+      bullish: "コア資産として、短期売買ではなく長期積立・資産形成の土台として機能するシナリオです。",
+      neutral: "短期的には上下しても、毎回の値動きより資金配分と現金余力を確認する状態です。",
+      bearish: "相場全体の下落が続く場合でも、損切りより積立方針や生活資金とのバランスを見直します。"
+    };
+  }
+  if (isSemiconductor) {
+    return {
+      bullish: `半導体テーマが継続し、売りが一巡すれば${take ? `${take.toLocaleString("ja-JP")}円付近` : "利確ライン付近"}まで反発する可能性を監視します。`,
+      neutral: "短期的には上下しながら方向感を探る展開を想定し、出来高と25日線の回復を確認します。",
+      bearish: `決算失望や半導体地合い悪化が続く場合、${stop ? `${stop.toLocaleString("ja-JP")}円割れ` : "損切りライン割れ"}までの下落に注意します。`
+    };
+  }
+  if (isTelecomIncome) {
+    return {
+      bullish: "配当・優待目的の買いが入り、安定した値動きで緩やかな上昇を監視できるシナリオです。",
+      neutral: "大きな値上がりは狙いにくいものの、配当・優待目的で保有継続しやすい状態です。",
+      bearish: "減配や優待改悪、通信事業の成長鈍化が意識される場合は見直しが必要です。"
+    };
+  }
+  if (isGame) {
+    return {
+      bullish: "タイトルラインナップやIP展開が評価され、中長期の成長枠として見直されるシナリオです。",
+      neutral: "短期の話題性だけでは判断せず、決算・新作・IP展開を確認しながら監視します。",
+      bearish: "新作不振や決算失望が出た場合、好きな会社という理由だけで買い増ししないよう注意します。"
+    };
+  }
+  return {
+    bullish: `買いライン${buy ? ` ${buy.toLocaleString("ja-JP")}円` : ""}付近で反発材料が出れば、候補として監視しやすくなります。`,
+    neutral: "大きな方向感が出るまでは、価格ライン・出来高・決算材料を確認する状態です。",
+    bearish: `悪材料や地合い悪化が続く場合、${stop ? `${stop.toLocaleString("ja-JP")}円付近` : "損切りライン"}で見直しを検討します。`
+  };
 }

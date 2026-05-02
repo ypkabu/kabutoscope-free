@@ -150,6 +150,7 @@ export async function addJournalAction(formData: FormData) {
   if (errors.length > 0) {
     redirect(`${returnTo}?journalError=${encodeURIComponent(errors.join(" / "))}`);
   }
+  const latestScoring = await fetchLatestScoringForJournal(supabase, String(formData.get("stockId") ?? ""), symbol);
   const { error } = await supabase.from("trade_journal").insert({
     stock_id: String(formData.get("stockId") ?? "") || null,
     symbol,
@@ -162,7 +163,15 @@ export async function addJournalAction(formData: FormData) {
     exit_condition: String(formData.get("exitCondition") ?? "") || null,
     take_profit_condition: String(formData.get("takeProfitCondition") ?? "") || null,
     stop_loss_condition: String(formData.get("stopLossCondition") ?? "") || null,
-    emotion_tag: String(formData.get("emotionTag") ?? "") || null
+    emotion_tag: String(formData.get("emotionTag") ?? "") || null,
+    buy_score: latestScoring?.buyScore?.score ?? null,
+    sell_score: latestScoring?.sellScore?.score ?? null,
+    risk_score: latestScoring?.riskScore?.score ?? null,
+    do_not_buy_score: latestScoring?.doNotBuyScore?.score ?? null,
+    fomo_risk_score: latestScoring?.fomoRiskScore?.score ?? null,
+    averaging_down_risk_score: latestScoring?.averagingDownRiskScore?.score ?? null,
+    portfolio_fit_score: latestScoring?.portfolioFitScore?.score ?? null,
+    final_decision: latestScoring?.finalDecision ?? latestScoring?.overallLabel ?? null
   });
   if (error) throw error;
   revalidatePath("/journal");
@@ -190,4 +199,14 @@ function numberOrNull(value: FormDataEntryValue | null) {
   if (value === null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+async function fetchLatestScoringForJournal(supabase: NonNullable<ReturnType<typeof createServiceSupabaseClient>>, stockId: string, symbol: string) {
+  const query = supabase.from("scoring_results").select("scores_json").order("created_at", { ascending: false }).limit(1);
+  const { data, error } = stockId ? await query.eq("stock_id", stockId) : await query.eq("symbol", symbol);
+  if (error) {
+    console.error(`判断メモ用スコアの取得に失敗しました: ${symbol} - ${error.message}`);
+    return null;
+  }
+  return (data?.[0]?.scores_json as any) ?? null;
 }

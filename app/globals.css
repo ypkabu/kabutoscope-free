@@ -106,6 +106,10 @@ h3 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.threeCol {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .card {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -339,6 +343,7 @@ button:disabled {
 
   .dashboardGrid,
   .twoCol,
+  .threeCol,
   .scoreGrid {
     grid-template-columns: 1fr;
   }

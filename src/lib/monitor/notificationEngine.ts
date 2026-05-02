@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getHistoricalPrices, getQuote } from "../finance/yahoo";
 import { mapAlertSetting, mapHolding, mapRiskLimit, mapStock } from "../mappers";
+import { defaultPortfolioSettings } from "../portfolio";
+import { getMarketContext } from "../scoring/market";
 import { calculateStockScore } from "../scoring/scoring";
 import { investmentHorizonLabels, positionPurposeLabels } from "../strategy";
 import { createServiceSupabaseClient } from "../supabase";
@@ -38,12 +40,20 @@ export async function runMonitoring(): Promise<MonitorSummary> {
     throw new Error(`有効銘柄の取得に失敗しました: ${stockError.message}`);
   }
 
+  const marketContext = await getMarketContext();
+  const portfolioSettings = await fetchPortfolioSettings(supabase);
+
   for (const stockRow of stockRows ?? []) {
     const stock = mapStock(stockRow);
     summary.checked += 1;
 
     try {
-      const [holding, alertSetting, riskLimit] = await Promise.all([fetchHolding(supabase, stock.id), fetchAlertSetting(supabase, stock.id), fetchRiskLimit(supabase, stock.id)]);
+      const [holding, alertSetting, riskLimit, recentBuyJournalCount] = await Promise.all([
+        fetchHolding(supabase, stock.id),
+        fetchAlertSetting(supabase, stock.id),
+        fetchRiskLimit(supabase, stock.id),
+        fetchRecentBuyJournalCount(supabase, stock.symbol)
+      ]);
       const quote = await getQuote(stock.symbol);
       const historicalPrices = await getHistoricalPrices(stock.symbol, "1y");
 
@@ -55,6 +65,9 @@ export async function runMonitoring(): Promise<MonitorSummary> {
         holding,
         alertSetting,
         riskLimit,
+        marketContext,
+        portfolioSettings,
+        recentBuyJournalCount,
         quote,
         historicalPrices
       });
@@ -109,6 +122,38 @@ async function fetchRiskLimit(supabase: SupabaseClient, stockId: string): Promis
   return data ? mapRiskLimit(data) : null;
 }
 
+async function fetchPortfolioSettings(supabase: SupabaseClient) {
+  const { data, error } = await supabase.from("portfolio_settings").select("*").eq("id", 1).maybeSingle();
+  if (error || !data) {
+    console.error(`資金設定の取得に失敗しました。初期値で判定します: ${error?.message ?? "未設定"}`);
+    return defaultPortfolioSettings;
+  }
+  return {
+    totalBudget: Number(data.total_budget ?? defaultPortfolioSettings.totalBudget),
+    cashAmount: Number(data.cash_amount ?? defaultPortfolioSettings.cashAmount),
+    rakutenNisaBudget: Number(data.rakuten_nisa_budget ?? defaultPortfolioSettings.rakutenNisaBudget),
+    sbiTokuteiBudget: Number(data.sbi_tokutei_budget ?? defaultPortfolioSettings.sbiTokuteiBudget),
+    minimumCashRatio: Number(data.minimum_cash_ratio ?? defaultPortfolioSettings.minimumCashRatio),
+    warningCashRatio: Number(data.warning_cash_ratio ?? defaultPortfolioSettings.warningCashRatio)
+  };
+}
+
+async function fetchRecentBuyJournalCount(supabase: SupabaseClient, symbol: string) {
+  const since = new Date();
+  since.setDate(since.getDate() - 30);
+  const { data, error } = await supabase
+    .from("trade_journal")
+    .select("id")
+    .eq("symbol", symbol)
+    .in("action_type", ["BUY", "BUY_PLAN"])
+    .gte("created_at", since.toISOString());
+  if (error) {
+    console.error(`判断メモの取得に失敗しました: ${symbol} - ${error.message}`);
+    return 0;
+  }
+  return data?.length ?? 0;
+}
+
 async function saveSnapshot(supabase: SupabaseClient, stock: Stock, quote: QuoteResult) {
   const { error } = await supabase.from("price_snapshots").insert({
     stock_id: stock.id,
@@ -138,6 +183,14 @@ async function saveScoringResult(supabase: SupabaseClient, stock: Stock, scoring
     sell_score: scoring.sellScore.score,
     risk_score: scoring.riskScore.score,
     confidence_score: scoring.confidenceScore.score,
+    market_score: scoring.marketScore.score,
+    timing_score: scoring.timingScore.score,
+    fomo_risk_score: scoring.fomoRiskScore.score,
+    averaging_down_risk_score: scoring.averagingDownRiskScore.score,
+    portfolio_fit_score: scoring.portfolioFitScore.score,
+    decision_confidence_score: scoring.decisionConfidenceScore.score,
+    do_not_buy_score: scoring.doNotBuyScore.score,
+    final_decision: scoring.finalDecision,
     scores_json: scoring
   });
 
@@ -264,6 +317,7 @@ function buildDiscordMessage(
   notificationType: NotificationType
 ) {
   const title = notificationTitle(notificationType);
+  const finalDecision = scoring.finalDecision ?? scoring.overallLabel;
   const priceSuffix = quote.currency === "JPY" || stock.country === "JP" ? "円" : quote.currency ?? "";
   const url = process.env.APP_BASE_URL ? `${process.env.APP_BASE_URL}/stocks/${encodeURIComponent(stock.symbol)}` : "";
   const reasons = [
@@ -273,7 +327,8 @@ function buildDiscordMessage(
   ].slice(0, 5);
 
   return [
-    `【${title}】${stock.name} ${stock.symbol}`,
+    `【${finalDecision}】${stock.name} ${stock.symbol}`,
+    `通知理由：${title}`,
     "",
     `現在値：${formatPrice(quote.currentPrice)}${priceSuffix}`,
     `買いライン：${formatPrice(alertSetting.buyBelow)}${priceSuffix}`,
@@ -286,19 +341,23 @@ function buildDiscordMessage(
     `平均取得単価：${formatPrice(holding?.averagePrice)}${priceSuffix}`,
     `含み損益：${scoring.positionProfitPercent === null ? "未計算" : `${scoring.positionProfitPercent >= 0 ? "+" : ""}${scoring.positionProfitPercent.toFixed(1)}%`}`,
     "",
+    `総合判定：${finalDecision}`,
     `NISA向き：${scoring.nisaScore.score}/100`,
     `特定口座向き：${scoring.tokuteiScore.score}/100`,
     `買い候補：${scoring.buyScore.score}/100`,
     `売り候補：${scoring.sellScore.score}/100`,
     `危険度：${scoring.riskScore.score}/100`,
+    `買わない理由：${scoring.doNotBuyScore.score}/100`,
+    `FOMOリスク：${scoring.fomoRiskScore.score}/100`,
+    `ナンピン危険度：${scoring.averagingDownRiskScore.score}/100`,
+    `ポートフォリオ適合：${scoring.portfolioFitScore.score}/100`,
     `判定信頼度：${scoring.confidenceScore.score}/100`,
-    `総合判定：${scoring.overallLabel}`,
     "",
-    "理由：",
+    "良い点：",
     ...(reasons.length > 0 ? reasons.map((reason) => `・${reason}`) : ["・判定材料が不足しているため、手動確認を優先してください"]),
     "",
-    ...(scoring.doNotBuyReasons.length > 0 ? ["買わない理由:", ...scoring.doNotBuyReasons.map((reason) => `・${reason}`), ""] : []),
-    `コメント：${mainComment(scoring)}`,
+    ...(scoring.doNotBuyReasons.length > 0 ? ["注意点:", ...scoring.doNotBuyReasons.map((reason) => `・${reason}`), ""] : []),
+    `判断：${mainComment(scoring)}`,
     "",
     "注意：これは投資助言ではなく、自分用の情報整理通知です。自動売買は行いません。",
     url ? `詳細：${url}` : ""

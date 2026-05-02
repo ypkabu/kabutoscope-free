@@ -8,6 +8,11 @@ const titles: Record<string, string> = {
   buy: "買い候補ランキング",
   sell: "保有株の利確・見直し候補ランキング",
   risk: "危険度ランキング",
+  smart: "総合AI風ランキング",
+  "do-not-buy": "買わない理由ランキング",
+  "fomo-risk": "高値追い注意ランキング",
+  "averaging-down-risk": "ナンピン注意ランキング",
+  "portfolio-fit": "ポートフォリオ適合ランキング",
   "short-term-sell": "短期利確候補ランキング",
   "long-term-review": "長期見直し候補ランキング",
   "by-horizon": "投資期間別ランキング"

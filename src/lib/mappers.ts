@@ -99,10 +99,54 @@ export function mapScoringResult(row: Record<string, any>): ScoringResult | null
   }
 
   const score = row.scores_json as ScoringResult;
+  const neutralBlock = createFallbackScoreBlock("データ不足", 50, "古いスコア履歴のため、この項目は次回監視時に更新されます。");
   return {
     ...score,
+    nisaScore: normalizeScoreBlock(score.nisaScore),
+    tokuteiScore: normalizeScoreBlock(score.tokuteiScore),
+    buyScore: normalizeScoreBlock(score.buyScore),
+    sellScore: normalizeScoreBlock(score.sellScore),
+    riskScore: normalizeScoreBlock(score.riskScore),
+    confidenceScore: normalizeScoreBlock(score.confidenceScore),
+    marketScore: normalizeScoreBlock(score.marketScore ?? neutralBlock),
+    timingScore: normalizeScoreBlock(score.timingScore ?? neutralBlock),
+    fomoRiskScore: normalizeScoreBlock(score.fomoRiskScore ?? createFallbackScoreBlock("通常", 20, "古いスコア履歴のため、次回監視時に更新されます。")),
+    averagingDownRiskScore: normalizeScoreBlock(score.averagingDownRiskScore ?? createFallbackScoreBlock("通常", 20, "古いスコア履歴のため、次回監視時に更新されます。")),
+    portfolioFitScore: normalizeScoreBlock(score.portfolioFitScore ?? neutralBlock),
+    decisionConfidenceScore: normalizeScoreBlock(score.decisionConfidenceScore ?? score.confidenceScore ?? neutralBlock),
+    doNotBuyScore: normalizeScoreBlock(score.doNotBuyScore ?? createFallbackScoreBlock("注意点あり", (score.doNotBuyReasons ?? []).length * 8, "古いスコア履歴のため、買わない理由スコアは参考値です。")),
     doNotBuyReasons: score.doNotBuyReasons ?? [],
     overallLabel: score.overallLabel ?? score.buyScore?.label ?? "監視のみ",
+    finalDecision: score.finalDecision ?? score.overallLabel ?? score.buyScore?.label ?? "監視のみ",
+    scenarios: score.scenarios ?? {
+      bullish: "次回の監視実行後にシナリオを更新します。",
+      neutral: "価格ラインとスコアを確認しながら監視します。",
+      bearish: "悪材料や地合い悪化がある場合は見直し候補として確認します。"
+    },
     positionProfitPercent: score.positionProfitPercent ?? null
+  };
+}
+
+function normalizeScoreBlock(block: any) {
+  return {
+    score: Number(block?.score ?? 0),
+    label: String(block?.label ?? "データ不足"),
+    reasons: Array.isArray(block?.reasons) ? block.reasons : [],
+    positiveFactors: Array.isArray(block?.positiveFactors) ? block.positiveFactors : [],
+    negativeFactors: Array.isArray(block?.negativeFactors) ? block.negativeFactors : [],
+    cautionFactors: Array.isArray(block?.cautionFactors) ? block.cautionFactors : [],
+    comment: String(block?.comment ?? "データ不足のため判定信頼度は低めです。")
+  };
+}
+
+function createFallbackScoreBlock(label: string, score: number, comment: string) {
+  return {
+    score,
+    label,
+    reasons: [],
+    positiveFactors: [],
+    negativeFactors: [],
+    cautionFactors: [],
+    comment
   };
 }

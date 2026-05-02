@@ -42,6 +42,10 @@ export default async function JournalPage({ searchParams }: { searchParams: Prom
                   <span className="block muted">利確条件: {row.take_profit_condition ?? "未入力"}</span>
                   <span className="block muted">損切り条件: {row.stop_loss_condition ?? "未入力"}</span>
                   <span className="block muted">感情: {emotionTagLabels[row.emotion_tag as keyof typeof emotionTagLabels] ?? "未入力"}</span>
+                  <span className="block muted">保存時の総合判定: {row.final_decision ?? "未保存"}</span>
+                  <span className="block muted">
+                    保存時スコア: 買い {row.buy_score ?? "未保存"} / 売り {row.sell_score ?? "未保存"} / 危険度 {row.risk_score ?? "未保存"} / 買わない理由 {row.do_not_buy_score ?? "未保存"} / FOMO {row.fomo_risk_score ?? "未保存"} / ナンピン {row.averaging_down_risk_score ?? "未保存"} / 適合 {row.portfolio_fit_score ?? "未保存"}
+                  </span>
                 </li>
               ))}
             </ul>

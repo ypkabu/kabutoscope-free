@@ -150,6 +150,16 @@ export function getRankingScore(overview: StockOverview, type: string) {
       return scoring.sellScore.score;
     case "risk":
       return scoring.riskScore.score;
+    case "smart":
+      return Math.max(scoring.buyScore.score, scoring.sellScore.score, scoring.portfolioFitScore.score) - Math.round(scoring.doNotBuyScore.score * 0.25);
+    case "do-not-buy":
+      return scoring.doNotBuyScore.score;
+    case "fomo-risk":
+      return scoring.fomoRiskScore.score;
+    case "averaging-down-risk":
+      return scoring.averagingDownRiskScore.score;
+    case "portfolio-fit":
+      return scoring.portfolioFitScore.score;
     case "short-term-sell":
       return overview.holding?.investmentHorizon === "SHORT" ? scoring.sellScore.score : 0;
     case "long-term-review":

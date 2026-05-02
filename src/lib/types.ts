@@ -120,6 +120,14 @@ export type TradeJournal = {
   takeProfitCondition: string | null;
   stopLossCondition: string | null;
   emotionTag: EmotionTag | null;
+  buyScore?: number | null;
+  sellScore?: number | null;
+  riskScore?: number | null;
+  doNotBuyScore?: number | null;
+  fomoRiskScore?: number | null;
+  averagingDownRiskScore?: number | null;
+  portfolioFitScore?: number | null;
+  finalDecision?: string | null;
   createdAt: string;
   updatedAt?: string;
 };
@@ -168,7 +176,27 @@ export type ScoreBlock = {
   reasons: string[];
   positiveFactors: string[];
   negativeFactors: string[];
+  cautionFactors: string[];
   comment: string;
+};
+
+export type MarketContext = {
+  score: number;
+  label: string;
+  positiveFactors: string[];
+  negativeFactors: string[];
+  cautionFactors: string[];
+  comment: string;
+  semiconductorWeak: boolean;
+  jpWeak: boolean;
+  usWeak: boolean;
+  generatedAt: string;
+};
+
+export type DecisionScenarios = {
+  bullish: string;
+  neutral: string;
+  bearish: string;
 };
 
 export type ScoringResult = {
@@ -178,8 +206,17 @@ export type ScoringResult = {
   sellScore: ScoreBlock;
   riskScore: ScoreBlock;
   confidenceScore: ScoreBlock;
+  marketScore: ScoreBlock;
+  timingScore: ScoreBlock;
+  fomoRiskScore: ScoreBlock;
+  averagingDownRiskScore: ScoreBlock;
+  portfolioFitScore: ScoreBlock;
+  decisionConfidenceScore: ScoreBlock;
+  doNotBuyScore: ScoreBlock;
   doNotBuyReasons: string[];
   overallLabel: string;
+  finalDecision: string;
+  scenarios: DecisionScenarios;
   positionProfitPercent: number | null;
   indicators: TechnicalIndicators;
   generatedAt: string;

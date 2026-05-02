@@ -76,7 +76,7 @@ export default async function StockDetailPage({ params, searchParams }: { params
       {scoring ? (
         <section className="card" style={{ marginTop: 16 }}>
           <h2>スコア</h2>
-          <p>総合判定: <strong>{scoring.overallLabel}</strong></p>
+          <p>総合判定: <strong>{scoring.finalDecision ?? scoring.overallLabel}</strong></p>
           {scoring.doNotBuyReasons.length > 0 ? (
             <p className="notice">買わない理由: {scoring.doNotBuyReasons.join("、")}</p>
           ) : null}
@@ -87,11 +87,35 @@ export default async function StockDetailPage({ params, searchParams }: { params
             <ScoreDetail title="売り候補" block={scoring.sellScore} />
             <ScoreDetail title="危険度" block={scoring.riskScore} />
             <ScoreDetail title="判定信頼度" block={scoring.confidenceScore} />
+            <ScoreDetail title="相場環境" block={scoring.marketScore} />
+            <ScoreDetail title="買うタイミング" block={scoring.timingScore} />
+            <ScoreDetail title="FOMOリスク" block={scoring.fomoRiskScore} />
+            <ScoreDetail title="ナンピン危険度" block={scoring.averagingDownRiskScore} />
+            <ScoreDetail title="ポートフォリオ適合" block={scoring.portfolioFitScore} />
+            <ScoreDetail title="買わない理由" block={scoring.doNotBuyScore} />
+            <ScoreDetail title="総合判定信頼度" block={scoring.decisionConfidenceScore} />
           </div>
         </section>
       ) : (
         <p className="notice">データ不足のため判定信頼度は低めです。</p>
       )}
+
+      {scoring ? (
+        <section className="grid threeCol" style={{ marginTop: 16 }}>
+          <article className="card">
+            <h2>強気シナリオ</h2>
+            <p>{scoring.scenarios.bullish}</p>
+          </article>
+          <article className="card">
+            <h2>中立シナリオ</h2>
+            <p>{scoring.scenarios.neutral}</p>
+          </article>
+          <article className="card">
+            <h2>弱気シナリオ</h2>
+            <p>{scoring.scenarios.bearish}</p>
+          </article>
+        </section>
+      ) : null}
 
       {scoring ? (
         <section className="grid twoCol" style={{ marginTop: 16 }}>
@@ -167,6 +191,10 @@ function ScoreDetail({ title, block }: { title: string; block: ScoreBlock }) {
       <strong>マイナス要因</strong>
       <ul className="reasonList">
         {block.negativeFactors.length > 0 ? block.negativeFactors.map((reason) => <li key={reason}>{reason}</li>) : <li>該当なし</li>}
+      </ul>
+      <strong>注意点</strong>
+      <ul className="reasonList">
+        {block.cautionFactors.length > 0 ? block.cautionFactors.map((reason) => <li key={reason}>{reason}</li>) : <li>該当なし</li>}
       </ul>
     </article>
   );
